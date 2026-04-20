@@ -332,9 +332,16 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
     </div>
     <div class="modal-body">
       <div class="form-grid">
-        <div class="form-group full">
-          <label>Deal Source / Broker</label>
-          <input type="text" id="f-source" placeholder="e.g. Broker name, referral source, direct">
+        <div class="form-group">
+          <label>Deal Source</label>
+          <select id="f-source-type" onchange="toggleSourceInput()">
+            <option value="broker">Via Broker</option>
+            <option value="direct">Direct</option>
+          </select>
+        </div>
+        <div class="form-group" id="f-source-name-wrap">
+          <label>Broker Name</label>
+          <input type="text" id="f-source" placeholder="e.g. ABC Brokerage, John Smith">
         </div>
         <div class="form-group full">
           <label>Lender (Bank / Private Lender)</label>
@@ -354,8 +361,29 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
           </select>
         </div>
         <div class="form-group full">
-          <label>Deal Address / Description</label>
-          <input type="text" id="f-addr" placeholder="e.g. 1234 Oak Street, Miami, FL 33101">
+          <label>Property Type</label>
+          <div style="display:flex;border:1px solid #D9E1F2;border-radius:6px;overflow:hidden">
+            <button type="button" id="toggle-single" onclick="setAddrMode('single')" style="flex:1;padding:9px;font-size:12px;font-weight:700;border:none;background:#1F3864;color:#fff;cursor:pointer">Single Property</button>
+            <button type="button" id="toggle-portfolio" onclick="setAddrMode('portfolio')" style="flex:1;padding:9px;font-size:12px;font-weight:700;border:none;background:#fff;color:#1F3864;cursor:pointer;border-left:1px solid #D9E1F2">Loan Portfolio</button>
+          </div>
+        </div>
+        <div class="form-group full" id="addr-single-wrap">
+          <label>Property Address</label>
+          <input type="text" id="f-addr-single" placeholder="e.g. 1234 Oak Street, Miami, FL 33101">
+        </div>
+        <div class="form-group full" id="addr-portfolio-wrap" style="display:none">
+          <label>Portfolio Description</label>
+          <textarea id="f-addr-portfolio" style="min-height:80px" placeholder="e.g. Pool of 12 NPLs across FL, TX, GA&#10;Mix of SFR and MF properties"></textarea>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">No. of Loans in Pool</label>
+              <input type="number" id="f-loan-count" placeholder="e.g. 12" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">States</label>
+              <input type="text" id="f-states" placeholder="e.g. FL, TX, GA" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
+            </div>
+          </div>
         </div>
         <div class="form-group">
           <label>UPB ($)</label>
@@ -450,6 +478,9 @@ function mapRow(r){
     lender:r.lender||'',
     type:r.type||'',
     addr:r.addr||'',
+    isPortfolio:r.is_portfolio||false,
+    loanCount:r.loan_count||null,
+    states:r.states||'',
     upb:r.upb||null,
     bidDate:r.bid_date||'',
     bid:r.bid||null,
@@ -466,6 +497,9 @@ function toRow(d){
     lender:d.lender||null,
     type:d.type,
     addr:d.addr,
+    is_portfolio:d.isPortfolio||false,
+    loan_count:d.loanCount||null,
+    states:d.states||null,
     upb:d.upb||null,
     bid_date:d.bidDate||null,
     bid:d.bid||null,
@@ -726,10 +760,18 @@ function renderTable(){
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Open</a>`
       :`<span style="color:#ccc;font-size:11px">—</span>`;
     return`<tr>
-      <td><div class="source-name">${hl(d.source,q)}</div></td>
+      <td>
+        ${d.source==='Direct'
+          ?'<span style="display:inline-block;background:#E6F4EA;color:#1a5c2e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">DIRECT</span>'
+          :`<div class="source-name">${hl(d.source,q)}</div>`}
+      </td>
       <td><div style="font-size:12px;color:#2d3748">${hl(d.lender||'',q)}</div></td>
       <td>${typeBadge(d.type)}</td>
-      <td><div style="color:#2d3748">${hl(d.addr,q)}</div></td>
+      <td>
+        ${d.isPortfolio?`<span style="display:inline-block;background:#EBF1FB;color:#1F3864;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-bottom:4px">PORTFOLIO${d.loanCount?' · '+d.loanCount+' loans':''}</span><br>`:''}
+        <div style="color:#2d3748;font-size:12.5px">${hl(d.addr,q)}</div>
+        ${d.isPortfolio&&d.states?`<div style="font-size:11px;color:#6b7c9a;margin-top:2px">${d.states}</div>`:''}
+      </td>
       <td class="upb">${fmt$(d.upb)}</td>
       <td>${ratioBadge(d.bid,d.upb)}</td>
       <td>${fmtDate(d.bidDate)}</td>
@@ -853,26 +895,58 @@ function renderScorecard(){
     </tr>`).join('');
 }
 
+/* ── SOURCE & ADDRESS TOGGLE ── */
+function toggleSourceInput(){
+  const isDirect=document.getElementById('f-source-type').value==='direct';
+  const wrap=document.getElementById('f-source-name-wrap');
+  wrap.style.display=isDirect?'none':'flex';
+  if(isDirect)document.getElementById('f-source').value='Direct';
+}
+function setAddrMode(mode){
+  const isSingle=mode==='single';
+  document.getElementById('addr-single-wrap').style.display=isSingle?'block':'none';
+  document.getElementById('addr-portfolio-wrap').style.display=isSingle?'none':'block';
+  document.getElementById('toggle-single').style.background=isSingle?'#1F3864':'#fff';
+  document.getElementById('toggle-single').style.color=isSingle?'#fff':'#1F3864';
+  document.getElementById('toggle-portfolio').style.background=isSingle?'#fff':'#1F3864';
+  document.getElementById('toggle-portfolio').style.color=isSingle?'#1F3864':'#fff';
+}
+
 /* ══════════════════════════════════════════
    MODALS — CRUD
    ══════════════════════════════════════════ */
 function openAddModal(){
   editingId=null;
   document.getElementById('modal-title').textContent='Add New Deal';
-  ['source','lender','type','addr','upb','biddate','bid','won','awarded','status','notes','fileref'].forEach(f=>{
+  ['source','lender','type','upb','biddate','bid','won','awarded','status','notes','fileref'].forEach(f=>{
     const el=document.getElementById('f-'+f);
     if(el)el.value=f==='won'?'Pending':f==='status'?'Active':'';
   });
+  document.getElementById('f-source-type').value='broker';
+  document.getElementById('f-source-name-wrap').style.display='flex';
+  document.getElementById('f-addr-single').value='';
+  document.getElementById('f-addr-portfolio').value='';
+  document.getElementById('f-loan-count').value='';
+  document.getElementById('f-states').value='';
+  setAddrMode('single');
   document.getElementById('deal-modal').classList.add('open');
 }
 function openEditModal(id){
   editingId=id;
   const d=deals.find(x=>x.id===id);if(!d)return;
   document.getElementById('modal-title').textContent='Edit Deal';
-  document.getElementById('f-source').value=d.source||'';
+  const isDirect=d.source==='Direct';
+  document.getElementById('f-source-type').value=isDirect?'direct':'broker';
+  document.getElementById('f-source-name-wrap').style.display=isDirect?'none':'flex';
+  document.getElementById('f-source').value=isDirect?'':d.source||'';
   document.getElementById('f-lender').value=d.lender||'';
   document.getElementById('f-type').value=d.type||'';
-  document.getElementById('f-addr').value=d.addr||'';
+  const isPortfolio=d.isPortfolio||false;
+  setAddrMode(isPortfolio?'portfolio':'single');
+  document.getElementById('f-addr-single').value=isPortfolio?'':d.addr||'';
+  document.getElementById('f-addr-portfolio').value=isPortfolio?d.addr||'':'';
+  document.getElementById('f-loan-count').value=d.loanCount||'';
+  document.getElementById('f-states').value=d.states||'';
   document.getElementById('f-upb').value=d.upb||'';
   document.getElementById('f-biddate').value=d.bidDate||'';
   document.getElementById('f-bid').value=d.bid||'';
@@ -888,10 +962,15 @@ function closeModal(){document.getElementById('deal-modal').classList.remove('op
 async function saveDeal(){
   if(!supabase){toast('Not connected to Supabase','error');return;}
   const d={
-    source:document.getElementById('f-source').value.trim(),
+    source:document.getElementById('f-source-type').value==='direct'?'Direct':document.getElementById('f-source').value.trim(),
     lender:document.getElementById('f-lender').value.trim(),
     type:document.getElementById('f-type').value,
-    addr:document.getElementById('f-addr').value.trim(),
+    isPortfolio:document.getElementById('addr-portfolio-wrap').style.display!=='none',
+    addr:(document.getElementById('addr-portfolio-wrap').style.display!=='none'
+      ?document.getElementById('f-addr-portfolio').value.trim()
+      :document.getElementById('f-addr-single').value.trim()),
+    loanCount:document.getElementById('f-loan-count').value?parseInt(document.getElementById('f-loan-count').value):null,
+    states:document.getElementById('f-states').value.trim(),
     upb:parseFloat(document.getElementById('f-upb').value)||null,
     bidDate:document.getElementById('f-biddate').value,
     bid:parseFloat(document.getElementById('f-bid').value)||null,
@@ -901,7 +980,7 @@ async function saveDeal(){
     notes:document.getElementById('f-notes').value.trim(),
     driveLink:document.getElementById('f-fileref').value.trim()
   };
-  if(!d.source||!d.type){toast('Deal Source and Deal Type are required.','error');return;}
+  if(!d.type){toast('Deal Type is required.','error');return;}if(!d.source){toast('Deal Source is required.','error');return;}
   const btn=document.getElementById('btn-save-deal');
   btn.classList.add('saving');btn.disabled=true;
   try{
