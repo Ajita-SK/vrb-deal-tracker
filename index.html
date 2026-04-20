@@ -387,20 +387,40 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
         </div>
         <div class="form-group full" id="addr-portfolio-wrap" style="display:none">
           <label>Portfolio Description</label>
-          <textarea id="f-addr-portfolio" style="min-height:80px" placeholder="e.g. Pool of 12 NPLs across FL, TX, GA&#10;Mix of SFR and MF properties"></textarea>
+          <textarea id="f-addr-portfolio" style="min-height:70px" placeholder="e.g. Pool of NPLs across FL, TX, GA — mix of SFR and MF"></textarea>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-            <div style="display:flex;flex-direction:column;gap:5px">
-              <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">No. of Loans in Pool</label>
-              <input type="number" id="f-loan-count" placeholder="e.g. 12" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
-            </div>
             <div style="display:flex;flex-direction:column;gap:5px">
               <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">States</label>
               <input type="text" id="f-states" placeholder="e.g. FL, TX, GA" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
             </div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">Total Loans in Tape</label>
+              <input type="number" id="f-tape-count" placeholder="e.g. 50" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
+            </div>
+          </div>
+          <div style="background:#EBF1FB;border:1px solid #D9E1F2;border-radius:8px;padding:14px;margin-top:12px">
+            <div style="font-size:11px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Loan Tape Summary</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">Total UPB of Tape ($)</label>
+                <input type="number" id="f-tape-upb" placeholder="e.g. 5000000" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;background:#fff" oninput="calcSelectionRatio()">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">Loans We Are Bidding On</label>
+                <input type="number" id="f-sel-count" placeholder="e.g. 12" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;background:#fff" oninput="calcSelectionRatio()">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">UPB of Our Selection ($)</label>
+                <input type="number" id="f-sel-upb" placeholder="e.g. 1200000" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;background:#fff" oninput="calcSelectionRatio()">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px;justify-content:flex-end">
+                <div style="background:#fff;border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:12px;color:#6b7c9a" id="tape-ratio-display">Selection ratio will appear here</div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="form-group">
-          <label>UPB ($)</label>
+          <label id="upb-label">UPB ($)</label>
           <input type="number" id="f-upb" placeholder="e.g. 1250000">
         </div>
         <div class="form-group">
@@ -495,6 +515,10 @@ function mapRow(r){
     isPortfolio:r.is_portfolio||false,
     loanCount:r.loan_count||null,
     states:r.states||'',
+    tapeCount:r.tape_count||null,
+    tapeUpb:r.tape_upb||null,
+    selCount:r.sel_count||null,
+    selUpb:r.sel_upb||null,
     upb:r.upb||null,
     bidDate:r.bid_date||'',
     bid:r.bid||null,
@@ -514,6 +538,10 @@ function toRow(d){
     is_portfolio:d.isPortfolio||false,
     loan_count:d.loanCount||null,
     states:d.states||null,
+    tape_count:d.tapeCount||null,
+    tape_upb:d.tapeUpb||null,
+    sel_count:d.selCount||null,
+    sel_upb:d.selUpb||null,
     upb:d.upb||null,
     bid_date:d.bidDate||null,
     bid:d.bid||null,
@@ -788,9 +816,13 @@ function renderTable(){
       <td><div style="font-size:12px;color:#2d3748">${hl(d.lender||'',q)}</div></td>
       <td>${typeBadge(d.type)}</td>
       <td>
-        ${d.isPortfolio?`<span style="display:inline-block;background:#EBF1FB;color:#1F3864;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-bottom:4px">PORTFOLIO${d.loanCount?' · '+d.loanCount+' loans':''}</span><br>`:''}
+        ${d.isPortfolio?`<span style="display:inline-block;background:#EBF1FB;color:#1F3864;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-bottom:4px">PORTFOLIO</span><br>`:''}
         <div style="color:#2d3748;font-size:12.5px">${hl(d.addr,q)}</div>
         ${d.isPortfolio&&d.states?`<div style="font-size:11px;color:#6b7c9a;margin-top:2px">${d.states}</div>`:''}
+        ${d.isPortfolio&&(d.tapeCount||d.selCount)?`<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">
+          ${d.tapeCount?`<span style="background:#F0F4FA;border:1px solid #D9E1F2;border-radius:8px;padding:2px 7px;font-size:10px;color:#4a5568">Tape: ${d.tapeCount} loans${d.tapeUpb?' · $'+(d.tapeUpb/1e6).toFixed(2)+'M':''}</span>`:''}
+          ${d.selCount?`<span style="background:#C6EFCE;border-radius:8px;padding:2px 7px;font-size:10px;font-weight:700;color:#1a6b3a">Bidding: ${d.selCount} loans${d.selUpb?' · $'+(d.selUpb/1e6).toFixed(2)+'M':''}</span>`:''}
+        </div>`:''} 
       </td>
       <td class="upb">${fmt$(d.upb)}</td>
       <td>${ratioBadge(d.bid,d.upb)}</td>
@@ -932,11 +964,26 @@ function setAddrMode(mode){
   document.getElementById('toggle-portfolio').style.color=isSingle?'#1F3864':'#fff';
   document.getElementById('type-single-wrap').style.display=isSingle?'flex':'none';
   document.getElementById('type-multi-wrap').style.display=isSingle?'none':'flex';
+  document.getElementById('upb-label').textContent=isSingle?'UPB ($)':'UPB of Our Selection ($) — override if different above';
   if(!isSingle){
     document.getElementById('f-type-res').checked=false;
     document.getElementById('f-type-mf').checked=false;
     document.getElementById('f-type-hotel').checked=false;
   }
+}
+function calcSelectionRatio(){
+  const tapeUPB=parseFloat(document.getElementById('f-tape-upb').value)||0;
+  const selUPB=parseFloat(document.getElementById('f-sel-upb').value)||0;
+  const tapeCount=parseFloat(document.getElementById('f-tape-count').value)||0;
+  const selCount=parseFloat(document.getElementById('f-sel-count').value)||0;
+  const el=document.getElementById('tape-ratio-display');
+  if(!tapeUPB&&!selUPB&&!tapeCount&&!selCount){el.textContent='Selection ratio will appear here';return;}
+  const parts=[];
+  if(tapeCount&&selCount)parts.push(`Bidding on ${selCount} of ${tapeCount} loans`);
+  if(tapeUPB&&selUPB){const pct=(selUPB/tapeUPB*100).toFixed(1);parts.push(`${pct}% of tape UPB`);}
+  el.textContent=parts.join(' · ')||'—';
+  el.style.color='#1F3864';el.style.fontWeight='600';
+  if(selUPB&&!document.getElementById('f-upb').value)document.getElementById('f-upb').value=selUPB;
 }
 
 /* ══════════════════════════════════════════
@@ -955,6 +1002,12 @@ function openAddModal(){
   document.getElementById('f-addr-portfolio').value='';
   document.getElementById('f-loan-count').value='';
   document.getElementById('f-states').value='';
+  document.getElementById('f-tape-count').value='';
+  document.getElementById('f-tape-upb').value='';
+  document.getElementById('f-sel-count').value='';
+  document.getElementById('f-sel-upb').value='';
+  const rd=document.getElementById('tape-ratio-display');
+  if(rd){rd.textContent='Selection ratio will appear here';rd.style.color='#6b7c9a';rd.style.fontWeight='400';}
   document.getElementById('f-type').value='';
   document.getElementById('f-type-res').checked=false;
   document.getElementById('f-type-mf').checked=false;
@@ -978,6 +1031,11 @@ function openEditModal(id){
   document.getElementById('f-addr-portfolio').value=isPortfolio?d.addr||'':'';
   document.getElementById('f-loan-count').value=d.loanCount||'';
   document.getElementById('f-states').value=d.states||'';
+  document.getElementById('f-tape-count').value=d.tapeCount||'';
+  document.getElementById('f-tape-upb').value=d.tapeUpb||'';
+  document.getElementById('f-sel-count').value=d.selCount||'';
+  document.getElementById('f-sel-upb').value=d.selUpb||'';
+  if(d.tapeUpb||d.selUpb||d.tapeCount||d.selCount)calcSelectionRatio();
   if(isPortfolio){
     const types=(d.type||'').split(', ');
     document.getElementById('f-type-res').checked=types.includes('Residential');
@@ -1017,6 +1075,10 @@ async function saveDeal(){
       :document.getElementById('f-addr-single').value.trim()),
     loanCount:document.getElementById('f-loan-count').value?parseInt(document.getElementById('f-loan-count').value):null,
     states:document.getElementById('f-states').value.trim(),
+    tapeCount:parseFloat(document.getElementById('f-tape-count').value)||null,
+    tapeUpb:parseFloat(document.getElementById('f-tape-upb').value)||null,
+    selCount:parseFloat(document.getElementById('f-sel-count').value)||null,
+    selUpb:parseFloat(document.getElementById('f-sel-upb').value)||null,
     upb:parseFloat(document.getElementById('f-upb').value)||null,
     bidDate:document.getElementById('f-biddate').value,
     bid:parseFloat(document.getElementById('f-bid').value)||null,
