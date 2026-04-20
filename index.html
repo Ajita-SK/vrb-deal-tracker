@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VRB Capital — Deal Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1146,17 +1147,14 @@ document.getElementById('nav-date').textContent=new Date().toLocaleDateString('e
 const VRB_URL='https://fcbipuwbsdihnxkhzjva.supabase.co';
 const VRB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs';
 
-function tryInit(attempt){
-  if(attempt>30){hideLoading();toast('Could not load Supabase library. Check your internet connection.','error');return;}
-  const sb=window.supabase;
-  if(sb&&typeof sb.createClient==='function'){
+window.addEventListener('load',function(){
+  if(window.supabase&&typeof window.supabase.createClient==='function'){
     initSupabase(VRB_URL,VRB_KEY);
   }else{
-    setTimeout(()=>tryInit(attempt+1),300);
+    hideLoading();
+    alert('Supabase library failed to load. Please check your internet connection and refresh.');
   }
-}
-tryInit(0);
+});
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
 </body>
 </html>
