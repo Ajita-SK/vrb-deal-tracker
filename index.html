@@ -1110,6 +1110,8 @@ async function saveDeal(){
     }
     closeModal();populateLenderFilter();applyFilters();
   }catch(e){
+    console.error('Save error:',e);
+    alert('Save failed: '+e.message);
     toast('Save failed: '+e.message,'error');
   }finally{
     btn.classList.remove('saving');btn.disabled=false;
