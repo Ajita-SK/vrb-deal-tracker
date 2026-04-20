@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VRB Capital — Deal Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#F0F4FA;color:#1a1a2e;min-height:100vh}
+
+/* ── TOAST ── */
+.toast{position:fixed;bottom:24px;right:24px;z-index:999;background:#1F3864;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none;max-width:320px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.error{background:#c0392b}
+.toast.success{background:#1a6b3a}
+
+/* ── LOADING ── */
+.loading-overlay{position:fixed;inset:0;background:rgba(240,244,250,.85);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.loading-overlay.hidden{display:none}
+.spinner{width:36px;height:36px;border:3px solid #D9E1F2;border-top-color:#1F3864;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:13px;color:#1F3864;font-weight:600}
+
+.nav{background:#1F3864;padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.nav-logo{color:#fff;font-size:18px;font-weight:700;letter-spacing:1px}
+.nav-logo span{color:#85B7EB;font-weight:400;font-size:13px;margin-left:10px}
+.nav-right{display:flex;align-items:center;gap:10px}
+.nav-date{color:#D9E1F2;font-size:12px}
+.nav-status{font-size:11px;padding:3px 9px;border-radius:10px;font-weight:700}
+.nav-status.connected{background:#1a6b3a;color:#C6EFCE}
+.nav-status.disconnected{background:#8b1a1a;color:#FADADD}
+.btn-export-nav{background:#2E5FA3;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.btn-export-nav:hover{background:#378ADD}
+.header{background:#1F3864;padding:24px 32px 0;border-bottom:3px solid #2E5FA3}
+.header h1{color:#fff;font-size:22px;font-weight:700;letter-spacing:.5px}
+.header-sub{color:#85B7EB;font-size:12px;margin-top:4px}
+.tabs{display:flex;gap:2px;padding-top:16px}
+.tab{padding:9px 20px;font-size:13px;font-weight:600;cursor:pointer;border-radius:6px 6px 0 0;color:#85B7EB;background:transparent;border:none;transition:all .2s}
+.tab.active{background:#F0F4FA;color:#1F3864}
+.tab:hover:not(.active){background:rgba(255,255,255,.1);color:#fff}
+.tab-count{background:#2E5FA3;color:#D9E1F2;border-radius:10px;padding:2px 7px;font-size:11px;margin-left:4px}
+.tab.active .tab-count{background:#D9E1F2;color:#1F3864}
+.kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;padding:20px 32px}
+.kpi{background:#fff;border-radius:8px;padding:14px 16px;border:1px solid #D9E1F2;border-top:3px solid #1F3864}
+.kpi-label{font-size:11px;color:#6b7c9a;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.kpi-value{font-size:22px;font-weight:700;color:#1F3864}
+.kpi-sub{font-size:11px;color:#888;margin-top:2px}
+.kpi.won .kpi-value{color:#1a6b3a}
+.kpi.loss .kpi-value{color:#c0392b}
+.kpi.pending-k .kpi-value{color:#b8660a}
+.content{padding:0 32px 40px}
+.alerts-panel{background:#fff;border-radius:8px;border:1px solid #D9E1F2;margin-bottom:16px;overflow:hidden}
+.alerts-header{background:#1F3864;padding:12px 18px;display:flex;align-items:center;justify-content:space-between}
+.alerts-header h3{color:#fff;font-size:13px;font-weight:700}
+.alerts-toggle{background:transparent;border:1px solid #85B7EB;color:#85B7EB;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer}
+.alerts-body{display:flex;gap:0;overflow-x:auto}
+.alert-group{flex:1;min-width:200px;padding:14px 16px;border-right:1px solid #EEF2F9}
+.alert-group:last-child{border-right:none}
+.alert-group-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.ag-red{color:#8b1a1a}.ag-yellow{color:#7a4700}.ag-green{color:#1a6b3a}.ag-grey{color:#4a5568}
+.alert-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-red{background:#e74c3c}.dot-yellow{background:#f39c12}.dot-green{background:#27ae60}
+.alert-item{display:flex;align-items:flex-start;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F5F7FA;gap:8px}
+.alert-item:last-child{border-bottom:none}
+.alert-addr{font-size:11.5px;color:#1F3864;font-weight:600;line-height:1.3}
+.alert-src{font-size:10px;color:#6b7c9a;margin-top:1px}
+.alert-days{font-size:11px;font-weight:700;white-space:nowrap}
+.alert-days.red{color:#8b1a1a}.alert-days.yellow{color:#7a4700}.alert-days.green{color:#1a6b3a}
+.alert-cal{background:transparent;border:none;cursor:pointer;font-size:14px;padding:0 2px;opacity:.7}
+.alert-cal:hover{opacity:1}
+.alert-empty{font-size:12px;color:#aab;padding:8px 0;font-style:italic}
+.filters{background:#fff;border-radius:8px;padding:14px 18px;margin-bottom:16px;border:1px solid #D9E1F2;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.filter-label{font-size:12px;color:#6b7c9a;font-weight:600}
+.filters input[type=text]{border:1px solid #D9E1F2;border-radius:6px;padding:7px 12px;font-size:13px;width:220px;outline:none;color:#1F3864}
+.filters input[type=text]:focus{border-color:#2E5FA3}
+.filter-select{border:1px solid #D9E1F2;border-radius:6px;padding:7px 12px;font-size:13px;outline:none;color:#1F3864;background:#fff;cursor:pointer}
+.btn-clear{background:transparent;border:1px solid #D9E1F2;border-radius:6px;padding:7px 14px;font-size:12px;color:#6b7c9a;cursor:pointer;font-weight:600}
+.btn-clear:hover{border-color:#2E5FA3;color:#1F3864}
+.filter-sep{width:1px;height:24px;background:#D9E1F2;margin:0 4px}
+.result-count{margin-left:auto;font-size:12px;color:#6b7c9a}
+.table-wrap{background:#fff;border-radius:8px;border:1px solid #D9E1F2;overflow:hidden}
+.table-header-bar{padding:12px 18px;border-bottom:1px solid #D9E1F2;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.table-title{font-size:14px;font-weight:700;color:#1F3864}
+.tbar-btns{display:flex;gap:8px;align-items:center}
+.btn-add{background:#1F3864;color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer}
+.btn-add:hover{background:#2E5FA3}
+.btn-csv{background:#fff;color:#1F3864;border:1px solid #D9E1F2;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.btn-csv:hover{background:#EBF1FB;border-color:#2E5FA3}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead tr{background:#1F3864}
+thead th{padding:10px 12px;color:#fff;font-weight:700;text-align:left;font-size:11.5px;white-space:nowrap;border-right:1px solid #2E5FA3}
+thead th:last-child{border-right:none}
+thead th.sortable{cursor:pointer;user-select:none}
+thead th.sortable:hover{background:#2E5FA3}
+.sort-arrow{margin-left:4px;opacity:.6}
+tbody tr{border-bottom:1px solid #EEF2F9;transition:background .15s}
+tbody tr:nth-child(even){background:#F7F9FD}
+tbody tr:hover{background:#EBF1FB}
+tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
+.no-results{text-align:center;padding:40px;color:#6b7c9a;font-size:14px}
+.badge{display:inline-block;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap}
+.badge-res{background:#E8EFF9;color:#1F3864}
+.badge-mf{background:#E6F4EA;color:#1a5c2e}
+.badge-hotel{background:#FEF3E2;color:#7a4700}
+.badge-yes{background:#C6EFCE;color:#1a6b3a}
+.badge-no{background:#FADADD;color:#8b1a1a}
+.badge-pending{background:#FFF3CD;color:#7a4700}
+.badge-active{background:#D9E1F2;color:#1F3864}
+.badge-closed{background:#E2E8F0;color:#4a5568}
+.badge-hold{background:#FDE8D8;color:#7a3b00}
+.days-pill{display:inline-block;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:700}
+.days-red{background:#FADADD;color:#8b1a1a}
+.days-yellow{background:#FFF3CD;color:#7a4700}
+.days-green{background:#C6EFCE;color:#1a6b3a}
+.days-grey{background:#E2E8F0;color:#4a5568}
+.milestone{display:flex;align-items:center;gap:6px;margin-top:4px}
+.mile-bar{flex:1;height:4px;background:#E2E8F0;border-radius:2px;max-width:80px}
+.mile-fill{height:100%;border-radius:2px}
+.mile-red{background:#e74c3c}.mile-yellow{background:#f39c12}.mile-green{background:#27ae60}
+.ratio-pill{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700}
+.ratio-low{background:#E6F4EA;color:#1a5c2e}
+.ratio-mid{background:#FFF3CD;color:#7a4700}
+.ratio-high{background:#FADADD;color:#8b1a1a}
+.action-btns{display:flex;gap:4px;flex-wrap:wrap}
+.btn-edit{background:#EBF1FB;color:#1F3864;border:1px solid #D9E1F2;border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;font-weight:600}
+.btn-edit:hover{background:#D9E1F2}
+.btn-del{background:#FEF0F0;color:#c0392b;border:1px solid #FADADD;border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;font-weight:600}
+.btn-del:hover{background:#FADADD}
+.btn-ical{background:#F0F4FA;color:#2E5FA3;border:1px solid #D9E1F2;border-radius:5px;padding:4px 7px;font-size:11px;cursor:pointer}
+.btn-ical:hover{background:#D9E1F2}
+.upb{font-weight:700;color:#1F3864}
+.bid-amt{color:#2d3748}
+.source-name{font-weight:600;color:#1F3864}
+.hl{background:#FFF3A3;border-radius:2px}
+.analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.analytics-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.chart-card{background:#fff;border-radius:8px;border:1px solid #D9E1F2;padding:20px}
+.chart-card h4{font-size:13px;font-weight:700;color:#1F3864;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid #EEF2F9}
+.chart-wrap{position:relative;height:220px}
+.scorecard-wrap{background:#fff;border-radius:8px;border:1px solid #D9E1F2;overflow:hidden}
+.scorecard-wrap table{font-size:12.5px}
+.scorecard-wrap thead tr{background:#1F3864}
+.scorecard-wrap thead th{padding:10px 14px;color:#fff;font-weight:700;font-size:11.5px}
+.scorecard-wrap tbody tr:nth-child(even){background:#F7F9FD}
+.scorecard-wrap tbody td{padding:10px 14px;border-bottom:1px solid #EEF2F9;color:#2d3748}
+.win-bar-wrap{display:flex;align-items:center;gap:8px}
+.win-bar-bg{height:6px;background:#E2E8F0;border-radius:3px;width:80px}
+.win-bar-fill{height:100%;border-radius:3px;background:#1F3864}
+.win-pct{font-size:11px;font-weight:700;color:#1F3864;min-width:32px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:12px;width:680px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal-head{background:#1F3864;padding:18px 24px;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between}
+.modal-head h3{color:#fff;font-size:16px;font-weight:700}
+.modal-close{background:transparent;border:none;color:#85B7EB;font-size:22px;cursor:pointer;line-height:1}
+.modal-close:hover{color:#fff}
+.modal-body{padding:24px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group.full{grid-column:1/-1}
+.form-group label{font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px}
+.form-group input,.form-group select,.form-group textarea{border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;font-family:Arial,sans-serif}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#2E5FA3}
+.form-group textarea{resize:vertical;min-height:70px}
+.modal-foot{padding:16px 24px;border-top:1px solid #D9E1F2;display:flex;justify-content:flex-end;gap:10px}
+.btn-cancel{background:#fff;border:1px solid #D9E1F2;color:#6b7c9a;border-radius:6px;padding:9px 20px;font-size:13px;font-weight:600;cursor:pointer}
+.btn-cancel:hover{border-color:#2E5FA3;color:#1F3864}
+.btn-save{background:#1F3864;color:#fff;border:none;border-radius:6px;padding:9px 24px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px}
+.btn-save:hover{background:#2E5FA3}
+.btn-save:disabled{background:#aaa;cursor:not-allowed}
+.save-spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:none}
+.btn-save.saving .save-spinner{display:block}
+.confirm-modal{background:#fff;border-radius:12px;width:380px;padding:28px;text-align:center}
+.confirm-modal h4{color:#1F3864;font-size:16px;margin-bottom:10px}
+.confirm-modal p{color:#6b7c9a;font-size:13px;margin-bottom:20px}
+.confirm-btns{display:flex;gap:10px;justify-content:center}
+.btn-confirm-del{background:#c0392b;color:#fff;border:none;border-radius:6px;padding:9px 22px;font-size:13px;font-weight:700;cursor:pointer}
+.btn-confirm-del:hover{background:#a93226}
+.page{display:none}
+.page.active{display:block}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">Connecting to database...</div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+<div class="nav">
+  <div class="nav-logo">VRB Capital <span>Deal Tracker</span></div>
+  <div class="nav-right">
+    <span class="nav-status disconnected" id="nav-status">● Offline</span>
+    <button class="btn-export-nav" onclick="exportCSV()">⬇ Export CSV</button>
+    <div class="nav-date" id="nav-date"></div>
+  </div>
+</div>
+
+<div class="header">
+  <div>
+    <h1>Deal Tracker Dashboard</h1>
+    <div class="header-sub">Residential &nbsp;|&nbsp; Multifamily &nbsp;|&nbsp; Hotel &nbsp;&nbsp;·&nbsp;&nbsp; Performing &amp; Non-Performing Mortgage Loans</div>
+  </div>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('all')">All Deals <span class="tab-count" id="tc-all">0</span></div>
+    <div class="tab" onclick="switchTab('res')">🏠 Residential <span class="tab-count" id="tc-res">0</span></div>
+    <div class="tab" onclick="switchTab('mf')">🏢 Multifamily <span class="tab-count" id="tc-mf">0</span></div>
+    <div class="tab" onclick="switchTab('hotel')">🏨 Hotel <span class="tab-count" id="tc-hotel">0</span></div>
+    <div class="tab" onclick="switchTab('analytics')">📊 Analytics</div>
+    <div class="tab" onclick="switchTab('scorecard')">🏆 Lender Scorecard</div>
+  </div>
+</div>
+
+<div class="kpi-strip">
+  <div class="kpi"><div class="kpi-label">Total Deals</div><div class="kpi-value" id="kpi-total">0</div><div class="kpi-sub">in tracker</div></div>
+  <div class="kpi"><div class="kpi-label">Total UPB</div><div class="kpi-value" id="kpi-upb">$0</div><div class="kpi-sub">aggregate</div></div>
+  <div class="kpi"><div class="kpi-label">Bids Placed</div><div class="kpi-value" id="kpi-bids">0</div><div class="kpi-sub">submitted</div></div>
+  <div class="kpi won"><div class="kpi-label">Bids Won</div><div class="kpi-value" id="kpi-won">0</div><div class="kpi-sub" id="kpi-winrate">—</div></div>
+  <div class="kpi loss"><div class="kpi-label">Bids Lost</div><div class="kpi-value" id="kpi-lost">0</div><div class="kpi-sub">not awarded</div></div>
+  <div class="kpi pending-k"><div class="kpi-label">Pending</div><div class="kpi-value" id="kpi-pending">0</div><div class="kpi-sub">awaiting decision</div></div>
+</div>
+
+<div class="content">
+  <div class="alerts-panel">
+    <div class="alerts-header">
+      <h3>⏰ Bid Deadline Alerts</h3>
+      <button class="alerts-toggle" onclick="toggleAlerts()">Hide</button>
+    </div>
+    <div class="alerts-body" id="alerts-body"></div>
+  </div>
+
+  <!-- DEALS PAGE -->
+  <div class="page active" id="page-deals">
+    <div class="filters">
+      <span class="filter-label">Search:</span>
+      <input type="text" id="search-input" placeholder="Search address, lender, notes..." oninput="applyFilters()">
+      <div class="filter-sep"></div>
+      <span class="filter-label">Lender:</span>
+      <select class="filter-select" id="filter-source" onchange="applyFilters()"><option value="">All Lenders</option></select>
+      <span class="filter-label">Broker:</span>
+      <select class="filter-select" id="filter-broker" onchange="applyFilters()"><option value="">All Brokers</option></select>
+      <span class="filter-label">Status:</span>
+      <select class="filter-select" id="filter-status" onchange="applyFilters()">
+        <option value="">All Statuses</option><option>Active</option><option>Closed</option><option>On Hold</option>
+      </select>
+      <span class="filter-label">Bid Won:</span>
+      <select class="filter-select" id="filter-won" onchange="applyFilters()">
+        <option value="">All</option><option value="Yes">Won</option><option value="No">Lost</option><option value="Pending">Pending</option>
+      </select>
+      <button class="btn-clear" onclick="clearFilters()">Clear filters</button>
+      <span class="result-count" id="result-count"></span>
+    </div>
+    <div class="table-wrap">
+      <div class="table-header-bar">
+        <span class="table-title" id="table-title">All Deals</span>
+        <div class="tbar-btns">
+          <button class="btn-csv" onclick="exportCSV()">⬇ Export CSV</button>
+          <button class="btn-add" onclick="openAddModal()">+ Add Deal</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th class="sortable" onclick="sortBy('source')">Deal Source / Broker <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortBy('lender')">Lender <span class="sort-arrow">↕</span></th>
+            <th>Type</th>
+            <th>Address / Description</th>
+            <th class="sortable" onclick="sortBy('upb')">UPB ($) <span class="sort-arrow">↕</span></th>
+            <th>Bid % of UPB</th>
+            <th class="sortable" onclick="sortBy('bid_date')">Bid Due Date <span class="sort-arrow">↕</span></th>
+            <th>Days Left</th>
+            <th>Status</th>
+            <th>Our Bid ($)</th>
+            <th>Bid Won?</th>
+            <th>Notes</th>
+            <th>Drive Folder</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody id="deal-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ANALYTICS PAGE -->
+  <div class="page" id="page-analytics">
+    <div class="analytics-grid">
+      <div class="chart-card"><h4>UPB by Asset Class</h4><div class="chart-wrap"><canvas id="chart-upb-type"></canvas></div></div>
+      <div class="chart-card"><h4>Bid Outcomes</h4><div class="chart-wrap"><canvas id="chart-outcomes"></canvas></div></div>
+    </div>
+    <div class="analytics-grid">
+      <div class="chart-card"><h4>UPB by Lender (Top 6)</h4><div class="chart-wrap"><canvas id="chart-lender-upb"></canvas></div></div>
+      <div class="chart-card"><h4>Deal Count by Type</h4><div class="chart-wrap"><canvas id="chart-deal-type"></canvas></div></div>
+    </div>
+    <div class="analytics-grid-3">
+      <div class="chart-card"><h4>Bid-to-UPB Ratio Distribution</h4><div class="chart-wrap"><canvas id="chart-ratio"></canvas></div></div>
+      <div class="chart-card"><h4>Avg Bid-to-UPB % by Type</h4><div class="chart-wrap"><canvas id="chart-ratio-type"></canvas></div></div>
+      <div class="chart-card"><h4>Active vs Closed Deals</h4><div class="chart-wrap"><canvas id="chart-status"></canvas></div></div>
+    </div>
+  </div>
+
+  <!-- SCORECARD PAGE -->
+  <div class="page" id="page-scorecard">
+    <div class="scorecard-wrap">
+      <div class="table-header-bar" style="background:#fff;padding:14px 18px">
+        <span class="table-title">Lender Scorecard</span>
+        <button class="btn-csv" onclick="exportScorecardCSV()">⬇ Export Scorecard CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Lender / Source</th><th>Deals</th><th>Total UPB</th><th>Bids Placed</th>
+            <th>Won</th><th>Lost</th><th>Pending</th><th>Win Rate</th><th>Avg UPB</th><th>Avg Bid % of UPB</th>
+          </tr></thead>
+          <tbody id="scorecard-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT MODAL -->
+<div class="modal-overlay" id="deal-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title">Add New Deal</h3>
+      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Deal Source / Broker</label>
+          <input type="text" id="f-source" placeholder="e.g. Broker name, referral source, direct">
+        </div>
+        <div class="form-group full">
+          <label>Lender (Bank / Private Lender)</label>
+          <input type="text" id="f-lender" placeholder="e.g. JPMorgan Chase, ABC Capital Fund">
+        </div>
+        <div class="form-group">
+          <label>Deal Type</label>
+          <select id="f-type">
+            <option value="">Select type</option>
+            <option>Residential</option><option>Multifamily</option><option>Hotel</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="f-status">
+            <option>Active</option><option>Closed</option><option>On Hold</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label>Deal Address / Description</label>
+          <input type="text" id="f-addr" placeholder="e.g. 1234 Oak Street, Miami, FL 33101">
+        </div>
+        <div class="form-group">
+          <label>UPB ($)</label>
+          <input type="number" id="f-upb" placeholder="e.g. 1250000">
+        </div>
+        <div class="form-group">
+          <label>Bid Due Date</label>
+          <input type="date" id="f-biddate">
+        </div>
+        <div class="form-group">
+          <label>Our Bid ($)</label>
+          <input type="number" id="f-bid" placeholder="e.g. 975000">
+        </div>
+        <div class="form-group">
+          <label>Bid Won?</label>
+          <select id="f-won">
+            <option>Pending</option><option>Yes</option><option>No</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Awarded Amount ($) — if won</label>
+          <input type="number" id="f-awarded" placeholder="e.g. 975000">
+        </div>
+        <div class="form-group full">
+          <label>Google Drive Link</label>
+          <input type="url" id="f-fileref" placeholder="https://drive.google.com/drive/folders/...">
+        </div>
+        <div class="form-group full">
+          <label>Notes</label>
+          <textarea id="f-notes" placeholder="Due diligence notes, borrower status, key flags..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-save" id="btn-save-deal" onclick="saveDeal()">
+        <span class="save-spinner"></span>
+        Save Deal
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM DELETE -->
+<div class="modal-overlay" id="confirm-modal">
+  <div class="confirm-modal">
+    <h4>Delete this deal?</h4>
+    <p>This will permanently remove it from Supabase. This cannot be undone.</p>
+    <div class="confirm-btns">
+      <button class="btn-cancel" onclick="closeConfirm()">Cancel</button>
+      <button class="btn-confirm-del" onclick="confirmDelete()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TODAY=new Date();TODAY.setHours(0,0,0,0);
+const NAVY='#1F3864',BLUE='#2E5FA3',GREEN='#27ae60',AMBER='#f39c12',RED='#e74c3c',TEAL='#1D9E75';
+
+/* ══════════════════════════════════════════
+   SUPABASE CONFIG
+   ══════════════════════════════════════════ */
+const STORAGE_KEY='vrb_supabase_config';
+let supabase=null;
+let deals=[];
+let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,alertsVisible=true,charts={};
+
+function initSupabase(url,key){
+  try{
+    const sb=window.supabase||window.supabaseJs;
+    if(!sb||!sb.createClient){throw new Error('Supabase library not loaded yet');}
+    supabase=sb.createClient(url,key);
+    setStatus(true);
+    loadDeals();
+  }catch(e){
+    toast('Connection failed: '+e.message,'error');
+    setStatus(false);
+    hideLoading();
+  }
+}
+function setStatus(ok){
+  const el=document.getElementById('nav-status');
+  el.textContent=ok?'● Live':'● Offline';
+  el.className='nav-status '+(ok?'connected':'disconnected');
+}
+
+/* ══════════════════════════════════════════
+   SUPABASE CRUD
+   ══════════════════════════════════════════ */
+function mapRow(r){
+  return{
+    id:r.id,
+    source:r.source||'',
+    lender:r.lender||'',
+    type:r.type||'',
+    addr:r.addr||'',
+    upb:r.upb||null,
+    bidDate:r.bid_date||'',
+    bid:r.bid||null,
+    won:r.won||'Pending',
+    awarded:r.awarded||null,
+    status:r.status||'Active',
+    notes:r.notes||'',
+    driveLink:r.drive_link||''
+  };
+}
+function toRow(d){
+  return{
+    source:d.source,
+    lender:d.lender||null,
+    type:d.type,
+    addr:d.addr,
+    upb:d.upb||null,
+    bid_date:d.bidDate||null,
+    bid:d.bid||null,
+    won:d.won,
+    awarded:d.awarded||null,
+    status:d.status,
+    notes:d.notes||null,
+    drive_link:d.driveLink||null
+  };
+}
+async function loadDeals(){
+  showLoading('Loading deals...');
+  try{
+    const{data,error}=await supabase.from('deals').select('*').order('id',{ascending:false});
+    if(error)throw error;
+    deals=data.map(mapRow);
+    hideLoading();
+    populateLenderFilter();
+    applyFilters();
+    toast(`${deals.length} deals loaded`,'success');
+  }catch(e){
+    hideLoading();
+    toast('Error loading deals: '+e.message,'error');
+    setStatus(false);
+  }
+}
+async function insertDeal(d){
+  const{data,error}=await supabase.from('deals').insert([toRow(d)]).select().single();
+  if(error)throw error;
+  return mapRow(data);
+}
+async function updateDeal(id,d){
+  const{data,error}=await supabase.from('deals').update(toRow(d)).eq('id',id).select().single();
+  if(error)throw error;
+  return mapRow(data);
+}
+async function deleteDeal(id){
+  const{error}=await supabase.from('deals').delete().eq('id',id);
+  if(error)throw error;
+}
+
+/* ══════════════════════════════════════════
+   UI HELPERS
+   ══════════════════════════════════════════ */
+let toastTimer=null;
+function toast(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.className='toast show'+(type?' '+type:'');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('show'),3000);
+}
+function showLoading(txt='Loading...'){
+  document.getElementById('loading-text').textContent=txt;
+  document.getElementById('loading-overlay').classList.remove('hidden');
+}
+function hideLoading(){document.getElementById('loading-overlay').classList.add('hidden');}
+
+/* ══════════════════════════════════════════
+   TABS
+   ══════════════════════════════════════════ */
+function switchTab(tab){
+  activeTab=tab;
+  const keys=['all','res','mf','hotel','analytics','scorecard'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',keys[i]===tab));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  if(['all','res','mf','hotel'].includes(tab)){
+    document.getElementById('page-deals').classList.add('active');
+    const titles={all:'All Deals',res:'Residential Deals',mf:'Multifamily Deals',hotel:'Hotel Deals'};
+    document.getElementById('table-title').textContent=titles[tab];
+    applyFilters();
+  }else if(tab==='analytics'){
+    document.getElementById('page-analytics').classList.add('active');
+    setTimeout(renderCharts,50);
+  }else if(tab==='scorecard'){
+    document.getElementById('page-scorecard').classList.add('active');
+    renderScorecard();
+  }
+}
+
+/* ══════════════════════════════════════════
+   ALERTS PANEL
+   ══════════════════════════════════════════ */
+function toggleAlerts(){
+  alertsVisible=!alertsVisible;
+  document.querySelector('.alerts-body').style.display=alertsVisible?'flex':'none';
+  document.querySelector('.alerts-toggle').textContent=alertsVisible?'Hide':'Show';
+}
+function renderAlerts(){
+  const active=deals.filter(d=>d.status==='Active'&&d.bidDate&&d.won==='Pending');
+  const groups=[
+    {label:'Due within 7 days',cls:'ag-red',dot:'dot-red',daysCls:'red',min:0,max:7,items:[]},
+    {label:'Due in 8–14 days',cls:'ag-yellow',dot:'dot-yellow',daysCls:'yellow',min:8,max:14,items:[]},
+    {label:'Due in 15–30 days',cls:'ag-green',dot:'dot-green',daysCls:'green',min:15,max:30,items:[]},
+    {label:'30+ days away',cls:'ag-grey',dot:'',daysCls:'green',min:31,max:9999,items:[]}
+  ];
+  active.forEach(d=>{
+    const dl=daysLeft(d.bidDate);
+    if(dl===null||dl<0)return;
+    const g=groups.find(g=>dl>=g.min&&dl<=g.max);
+    if(g)g.items.push({...d,dl});
+  });
+  groups.forEach(g=>g.items.sort((a,b)=>a.dl-b.dl));
+  document.getElementById('alerts-body').innerHTML=groups.map(g=>`
+    <div class="alert-group">
+      <div class="alert-group-label ${g.cls}">
+        ${g.dot?`<span class="alert-dot ${g.dot}"></span>`:''}${g.label} (${g.items.length})
+      </div>
+      ${g.items.length?g.items.map(d=>`
+        <div class="alert-item">
+          <div><div class="alert-addr">${d.addr.split(',')[0]}</div><div class="alert-src">${d.source}</div></div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span class="alert-days ${g.daysCls}">${d.dl}d</span>
+            <button class="alert-cal" onclick="downloadICS(${d.id})" title="Add to Calendar">📅</button>
+          </div>
+        </div>`).join(''):`<div class="alert-empty">None</div>`}
+    </div>`).join('');
+}
+
+/* ══════════════════════════════════════════
+   CALENDAR (.ics)
+   ══════════════════════════════════════════ */
+function downloadICS(id){
+  const d=deals.find(x=>x.id===id);
+  if(!d||!d.bidDate)return;
+  const dt=d.bidDate.replace(/-/g,'');
+  const now=new Date().toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
+  const summary=`VRB Bid Due: ${d.addr.split(',')[0]} (${d.source})`;
+  const desc=`Deal: ${d.addr}\\nSource: ${d.source}\\nLender: ${d.lender||'—'}\\nType: ${d.type}\\nUPB: ${fmt$(d.upb)}\\nOur Bid: ${fmt$(d.bid)}\\nNotes: ${d.notes||''}`;
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//VRB Capital//Deal Tracker//EN',
+    'BEGIN:VEVENT',`UID:vrb-${d.id}-${dt}@vrbcapital.com`,`DTSTAMP:${now}`,
+    `DTSTART;VALUE=DATE:${dt}`,`DTEND;VALUE=DATE:${dt}`,
+    `SUMMARY:${summary}`,`DESCRIPTION:${desc}`,
+    'BEGIN:VALARM','TRIGGER:-P1D','ACTION:DISPLAY',`DESCRIPTION:REMINDER: ${summary}`,'END:VALARM',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([ics],{type:'text/calendar'}));
+  a.download=`VRB_Bid_${d.addr.split(',')[0].replace(/\s+/g,'_')}_${dt}.ics`;
+  a.click();
+}
+
+/* ══════════════════════════════════════════
+   CSV EXPORT
+   ══════════════════════════════════════════ */
+function exportCSV(){
+  const rows=getFiltered();
+  const headers=['Deal Source / Broker','Lender','Deal Type','Address','UPB ($)','Bid Due Date','Days Left','Status','Our Bid ($)','Bid % of UPB','Bid Won?','Awarded Amt ($)','Notes','Google Drive Link'];
+  const csv=[headers,...rows.map(d=>{
+    const dl=daysLeft(d.bidDate);
+    const ratio=bidRatio(d.bid,d.upb);
+    return[d.source,d.lender||'',d.type,d.addr,d.upb||'',fmtDate(d.bidDate),dl!==null?dl:'',d.status,d.bid||'',ratio!==null?ratio+'%':'',d.won,d.awarded||'',d.notes||'',d.driveLink||''];
+  })].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`VRB_DealTracker_${new Date().toISOString().slice(0,10).replace(/-/g,'')}.csv`;
+  a.click();
+}
+function exportScorecardCSV(){
+  const sc=buildScorecard();
+  const headers=['Lender','Deals','Total UPB','Bids Placed','Won','Lost','Pending','Win Rate %','Avg UPB','Avg Bid % of UPB'];
+  const csv=[headers,...sc.map(r=>[r.source,r.total,r.totalUPB,r.bidsPlaced,r.won,r.lost,r.pending,r.winRate,r.avgUPB,r.avgRatio||''])].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`VRB_LenderScorecard_${new Date().toISOString().slice(0,10).replace(/-/g,'')}.csv`;
+  a.click();
+}
+
+/* ══════════════════════════════════════════
+   FILTER & TABLE
+   ══════════════════════════════════════════ */
+function fmt$(n){if(!n&&n!==0)return'—';return'$'+Number(n).toLocaleString('en-US')}
+function fmtDate(s){if(!s)return'—';const d=new Date(s+'T00:00:00');return(d.getMonth()+1)+'/'+(d.getDate())+'/'+d.getFullYear()}
+function daysLeft(s){if(!s)return null;const d=new Date(s+'T00:00:00');return Math.round((d-TODAY)/(1000*60*60*24))}
+function bidRatio(bid,upb){if(!bid||!upb)return null;return Math.round(bid/upb*1000)/10}
+
+function getFiltered(){
+  const q=(document.getElementById('search-input').value||'').toLowerCase();
+  const src=document.getElementById('filter-source').value;
+  const broker=document.getElementById('filter-broker').value;
+  const st=document.getElementById('filter-status').value;
+  const won=document.getElementById('filter-won').value;
+  const typeMap={res:'Residential',mf:'Multifamily',hotel:'Hotel'};
+  return deals.filter(d=>{
+    if(['res','mf','hotel'].includes(activeTab)&&d.type!==typeMap[activeTab])return false;
+    if(src&&d.lender!==src)return false;
+    if(broker&&d.source!==broker)return false;
+    if(st&&d.status!==st)return false;
+    if(won&&d.won!==won)return false;
+    if(q){const blob=(d.source+d.lender+d.type+d.addr+(d.notes||'')).toLowerCase();if(!blob.includes(q))return false;}
+    return true;
+  }).sort((a,b)=>{
+    if(!sortField)return 0;
+    let va=a[sortField],vb=b[sortField];
+    if(va==null)va='';if(vb==null)vb='';
+    return va>vb?sortDir:va<vb?-sortDir:0;
+  });
+}
+function sortBy(f){if(sortField===f)sortDir*=-1;else{sortField=f;sortDir=1;}applyFilters();}
+function clearFilters(){
+  document.getElementById('search-input').value='';
+  document.getElementById('filter-source').value='';
+  document.getElementById('filter-broker').value='';
+  document.getElementById('filter-status').value='';
+  document.getElementById('filter-won').value='';
+  applyFilters();
+}
+
+function daysBadge(dl){
+  if(dl===null)return'<span class="days-pill days-grey">—</span>';
+  if(dl<0)return'<span class="days-pill days-grey">Expired</span>';
+  if(dl<=7)return`<span class="days-pill days-red">${dl}d !</span>`;
+  if(dl<=14)return`<span class="days-pill days-yellow">${dl}d</span>`;
+  return`<span class="days-pill days-green">${dl}d</span>`;
+}
+function mileBar(dl){
+  if(dl===null||dl<0)return'';
+  const pct=Math.min(100,Math.max(0,Math.round((1-dl/90)*100)));
+  const cls=dl<=7?'mile-red':dl<=14?'mile-yellow':'mile-green';
+  return`<div class="milestone"><div class="mile-bar"><div class="mile-fill ${cls}" style="width:${pct}%"></div></div></div>`;
+}
+function typeBadge(t){
+  const m={Residential:'badge-res',Multifamily:'badge-mf',Hotel:'badge-hotel'};
+  const ic={Residential:'🏠',Multifamily:'🏢',Hotel:'🏨'};
+  return`<span class="badge ${m[t]||''}">${ic[t]||''} ${t}</span>`;
+}
+function wonBadge(w){
+  const m={Yes:'badge-yes',No:'badge-no',Pending:'badge-pending'};
+  return`<span class="badge ${m[w]||'badge-pending'}">${w||'Pending'}</span>`;
+}
+function statusBadge(s){
+  const m={Active:'badge-active',Closed:'badge-closed','On Hold':'badge-hold'};
+  return`<span class="badge ${m[s]||'badge-active'}">${s}</span>`;
+}
+function ratioBadge(bid,upb){
+  const r=bidRatio(bid,upb);
+  if(r===null)return'<span style="color:#aaa;font-size:11px">—</span>';
+  const cls=r<70?'ratio-low':r<85?'ratio-mid':'ratio-high';
+  return`<span class="ratio-pill ${cls}">${r.toFixed(1)}%</span>`;
+}
+function hl(text,q){
+  if(!q||!text)return text||'';
+  const i=text.toLowerCase().indexOf(q.toLowerCase());
+  if(i<0)return text;
+  return text.slice(0,i)+'<span class="hl">'+text.slice(i,i+q.length)+'</span>'+text.slice(i+q.length);
+}
+
+function renderTable(){
+  const rows=getFiltered();
+  const q=(document.getElementById('search-input').value||'').toLowerCase();
+  document.getElementById('result-count').textContent=`${rows.length} deal${rows.length!==1?'s':''} shown`;
+  const tbody=document.getElementById('deal-tbody');
+  if(!rows.length){tbody.innerHTML=`<tr><td colspan="14" class="no-results">${supabase?'No deals match your filters.':'Connect to Supabase to load deals.'}</td></tr>`;return;}
+  tbody.innerHTML=rows.map(d=>{
+    const dl=daysLeft(d.bidDate);
+    const hasDate=d.bidDate&&d.won==='Pending'&&d.status==='Active';
+    const driveCell=d.driveLink
+      ?`<a href="${d.driveLink}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;color:#2E5FA3;font-size:11px;font-weight:600;text-decoration:none;border:1px solid #D9E1F2;border-radius:5px;padding:3px 8px;background:#F0F6FF">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Open</a>`
+      :`<span style="color:#ccc;font-size:11px">—</span>`;
+    return`<tr>
+      <td><div class="source-name">${hl(d.source,q)}</div></td>
+      <td><div style="font-size:12px;color:#2d3748">${hl(d.lender||'',q)}</div></td>
+      <td>${typeBadge(d.type)}</td>
+      <td><div style="color:#2d3748">${hl(d.addr,q)}</div></td>
+      <td class="upb">${fmt$(d.upb)}</td>
+      <td>${ratioBadge(d.bid,d.upb)}</td>
+      <td>${fmtDate(d.bidDate)}</td>
+      <td>${daysBadge(dl)}${mileBar(dl)}</td>
+      <td>${statusBadge(d.status)}</td>
+      <td class="bid-amt">${fmt$(d.bid)}</td>
+      <td>${wonBadge(d.won)}</td>
+      <td style="max-width:180px;font-size:11px;color:#6b7c9a">${hl(d.notes||'',q)}</td>
+      <td>${driveCell}</td>
+      <td><div class="action-btns">
+        <button class="btn-edit" onclick="openEditModal(${d.id})">Edit</button>
+        <button class="btn-del" onclick="openDeleteModal(${d.id})">Del</button>
+        ${hasDate?`<button class="btn-ical" onclick="downloadICS(${d.id})" title="Add to Calendar">📅</button>`:''}
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateKPIs(){
+  const totalUPB=deals.reduce((s,d)=>s+(+d.upb||0),0);
+  const bids=deals.filter(d=>d.bid).length;
+  const won=deals.filter(d=>d.won==='Yes').length;
+  const lost=deals.filter(d=>d.won==='No').length;
+  const pend=deals.filter(d=>d.won==='Pending').length;
+  document.getElementById('kpi-total').textContent=deals.length;
+  document.getElementById('kpi-upb').textContent=totalUPB>=1e6?'$'+(totalUPB/1e6).toFixed(1)+'M':'$'+totalUPB.toLocaleString();
+  document.getElementById('kpi-bids').textContent=bids;
+  document.getElementById('kpi-won').textContent=won;
+  document.getElementById('kpi-winrate').textContent=bids?`${Math.round(won/bids*100)}% win rate`:'—';
+  document.getElementById('kpi-lost').textContent=lost;
+  document.getElementById('kpi-pending').textContent=pend;
+  document.getElementById('tc-all').textContent=deals.length;
+  document.getElementById('tc-res').textContent=deals.filter(d=>d.type==='Residential').length;
+  document.getElementById('tc-mf').textContent=deals.filter(d=>d.type==='Multifamily').length;
+  document.getElementById('tc-hotel').textContent=deals.filter(d=>d.type==='Hotel').length;
+}
+function populateLenderFilter(){
+  const sel=document.getElementById('filter-source');
+  const cur=sel.value;
+  const lenders=[...new Set(deals.map(d=>d.lender).filter(Boolean))].sort();
+  sel.innerHTML='<option value="">All Lenders</option>'+lenders.map(s=>`<option${s===cur?' selected':''}>${s}</option>`).join('');
+  const bsel=document.getElementById('filter-broker');
+  const bcur=bsel.value;
+  const brokers=[...new Set(deals.map(d=>d.source).filter(Boolean))].sort();
+  bsel.innerHTML='<option value="">All Brokers</option>'+brokers.map(s=>`<option${s===bcur?' selected':''}>${s}</option>`).join('');
+}
+function applyFilters(){renderTable();updateKPIs();renderAlerts();}
+
+/* ══════════════════════════════════════════
+   CHARTS
+   ══════════════════════════════════════════ */
+function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
+function renderCharts(){
+  destroyChart('upb-type');
+  const typeUPB={Residential:0,Multifamily:0,Hotel:0};
+  deals.forEach(d=>{if(d.upb)typeUPB[d.type]=(typeUPB[d.type]||0)+(+d.upb);});
+  charts['upb-type']=new Chart(document.getElementById('chart-upb-type'),{type:'doughnut',data:{labels:Object.keys(typeUPB),datasets:[{data:Object.values(typeUPB),backgroundColor:[NAVY,TEAL,AMBER],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11},padding:12}},tooltip:{callbacks:{label:ctx=>' $'+(ctx.raw/1e6).toFixed(2)+'M'}}}}});
+
+  destroyChart('outcomes');
+  const won=deals.filter(d=>d.won==='Yes').length,lost=deals.filter(d=>d.won==='No').length,pend=deals.filter(d=>d.won==='Pending').length;
+  charts['outcomes']=new Chart(document.getElementById('chart-outcomes'),{type:'doughnut',data:{labels:['Won','Lost','Pending'],datasets:[{data:[won,lost,pend],backgroundColor:[GREEN,RED,AMBER],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11},padding:12}}}}});
+
+  destroyChart('lender-upb');
+  const lUPB={};deals.forEach(d=>{if(d.upb)lUPB[d.lender||d.source]=(lUPB[d.lender||d.source]||0)+(+d.upb);});
+  const sorted=Object.entries(lUPB).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  charts['lender-upb']=new Chart(document.getElementById('chart-lender-upb'),{type:'bar',data:{labels:sorted.map(x=>x[0].length>18?x[0].slice(0,18)+'…':x[0]),datasets:[{label:'UPB ($M)',data:sorted.map(x=>+(x[1]/1e6).toFixed(2)),backgroundColor:NAVY,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'$'+v+'M',font:{size:10}},grid:{color:'#EEF2F9'}},x:{ticks:{font:{size:9}}}}}});
+
+  destroyChart('deal-type');
+  const typeCnt={Residential:0,Multifamily:0,Hotel:0};deals.forEach(d=>{typeCnt[d.type]=(typeCnt[d.type]||0)+1;});
+  charts['deal-type']=new Chart(document.getElementById('chart-deal-type'),{type:'bar',data:{labels:Object.keys(typeCnt),datasets:[{data:Object.values(typeCnt),backgroundColor:[NAVY,TEAL,AMBER],borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{stepSize:1,font:{size:10}},grid:{color:'#EEF2F9'}},x:{ticks:{font:{size:11}}}}}});
+
+  destroyChart('ratio');
+  const buckets={'<60%':0,'60–70%':0,'70–80%':0,'80–90%':0,'>90%':0};
+  deals.filter(d=>d.bid&&d.upb).forEach(d=>{const r=d.bid/d.upb*100;if(r<60)buckets['<60%']++;else if(r<70)buckets['60–70%']++;else if(r<80)buckets['70–80%']++;else if(r<90)buckets['80–90%']++;else buckets['>90%']++;});
+  charts['ratio']=new Chart(document.getElementById('chart-ratio'),{type:'bar',data:{labels:Object.keys(buckets),datasets:[{data:Object.values(buckets),backgroundColor:[TEAL,GREEN,AMBER,RED,'#8b1a1a'],borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{stepSize:1,font:{size:10}},grid:{color:'#EEF2F9'}},x:{ticks:{font:{size:10}}}}}});
+
+  destroyChart('ratio-type');
+  const rByType={Residential:[],Multifamily:[],Hotel:[]};
+  deals.filter(d=>d.bid&&d.upb).forEach(d=>rByType[d.type].push(d.bid/d.upb*100));
+  const avgR=Object.entries(rByType).map(([k,v])=>[k,v.length?+(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1):0]);
+  charts['ratio-type']=new Chart(document.getElementById('chart-ratio-type'),{type:'bar',data:{labels:avgR.map(x=>x[0]),datasets:[{data:avgR.map(x=>x[1]),backgroundColor:[NAVY,TEAL,AMBER],borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'%',font:{size:10}},max:100,grid:{color:'#EEF2F9'}},x:{ticks:{font:{size:11}}}}}});
+
+  destroyChart('status');
+  const sCnt={Active:0,Closed:0,'On Hold':0};deals.forEach(d=>{sCnt[d.status]=(sCnt[d.status]||0)+1;});
+  charts['status']=new Chart(document.getElementById('chart-status'),{type:'doughnut',data:{labels:Object.keys(sCnt),datasets:[{data:Object.values(sCnt),backgroundColor:[BLUE,NAVY,'#b8660a'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11},padding:12}}}}});
+}
+
+/* ══════════════════════════════════════════
+   SCORECARD
+   ══════════════════════════════════════════ */
+function buildScorecard(){
+  const map={};
+  deals.forEach(d=>{
+    const key=d.lender||d.source;
+    if(!map[key])map[key]={source:key,total:0,totalUPB:0,bidsPlaced:0,won:0,lost:0,pending:0,ratios:[]};
+    const s=map[key];s.total++;s.totalUPB+=(+d.upb||0);
+    if(d.bid){s.bidsPlaced++;if(d.upb)s.ratios.push(d.bid/d.upb*100);}
+    if(d.won==='Yes')s.won++;else if(d.won==='No')s.lost++;else s.pending++;
+  });
+  return Object.values(map).sort((a,b)=>b.totalUPB-a.totalUPB).map(s=>({...s,
+    winRate:s.bidsPlaced?Math.round(s.won/s.bidsPlaced*100):0,
+    avgUPB:s.total?Math.round(s.totalUPB/s.total):0,
+    avgRatio:s.ratios.length?+(s.ratios.reduce((a,b)=>a+b,0)/s.ratios.length).toFixed(1):null
+  }));
+}
+function renderScorecard(){
+  const sc=buildScorecard();
+  const maxWin=Math.max(...sc.map(s=>s.winRate),1);
+  document.getElementById('scorecard-tbody').innerHTML=sc.map(s=>`
+    <tr>
+      <td><strong style="color:#1F3864">${s.source}</strong></td>
+      <td style="text-align:center">${s.total}</td>
+      <td style="font-weight:700;color:#1F3864">${s.totalUPB>=1e6?'$'+(s.totalUPB/1e6).toFixed(2)+'M':fmt$(s.totalUPB)}</td>
+      <td style="text-align:center">${s.bidsPlaced}</td>
+      <td style="text-align:center;color:#1a6b3a;font-weight:700">${s.won}</td>
+      <td style="text-align:center;color:#c0392b;font-weight:700">${s.lost}</td>
+      <td style="text-align:center;color:#b8660a;font-weight:700">${s.pending}</td>
+      <td><div class="win-bar-wrap"><div class="win-bar-bg"><div class="win-bar-fill" style="width:${s.bidsPlaced?Math.round(s.winRate/maxWin*100):0}%"></div></div><span class="win-pct">${s.winRate}%</span></div></td>
+      <td>${s.avgUPB>=1e6?'$'+(s.avgUPB/1e6).toFixed(2)+'M':fmt$(s.avgUPB)}</td>
+      <td style="text-align:center;font-weight:700;color:#1F3864">${s.avgRatio!==null?s.avgRatio+'%':'—'}</td>
+    </tr>`).join('');
+}
+
+/* ══════════════════════════════════════════
+   MODALS — CRUD
+   ══════════════════════════════════════════ */
+function openAddModal(){
+  editingId=null;
+  document.getElementById('modal-title').textContent='Add New Deal';
+  ['source','lender','type','addr','upb','biddate','bid','won','awarded','status','notes','fileref'].forEach(f=>{
+    const el=document.getElementById('f-'+f);
+    if(el)el.value=f==='won'?'Pending':f==='status'?'Active':'';
+  });
+  document.getElementById('deal-modal').classList.add('open');
+}
+function openEditModal(id){
+  editingId=id;
+  const d=deals.find(x=>x.id===id);if(!d)return;
+  document.getElementById('modal-title').textContent='Edit Deal';
+  document.getElementById('f-source').value=d.source||'';
+  document.getElementById('f-lender').value=d.lender||'';
+  document.getElementById('f-type').value=d.type||'';
+  document.getElementById('f-addr').value=d.addr||'';
+  document.getElementById('f-upb').value=d.upb||'';
+  document.getElementById('f-biddate').value=d.bidDate||'';
+  document.getElementById('f-bid').value=d.bid||'';
+  document.getElementById('f-won').value=d.won||'Pending';
+  document.getElementById('f-awarded').value=d.awarded||'';
+  document.getElementById('f-status').value=d.status||'Active';
+  document.getElementById('f-notes').value=d.notes||'';
+  document.getElementById('f-fileref').value=d.driveLink||'';
+  document.getElementById('deal-modal').classList.add('open');
+}
+function closeModal(){document.getElementById('deal-modal').classList.remove('open');}
+
+async function saveDeal(){
+  if(!supabase){toast('Not connected to Supabase','error');return;}
+  const d={
+    source:document.getElementById('f-source').value.trim(),
+    lender:document.getElementById('f-lender').value.trim(),
+    type:document.getElementById('f-type').value,
+    addr:document.getElementById('f-addr').value.trim(),
+    upb:parseFloat(document.getElementById('f-upb').value)||null,
+    bidDate:document.getElementById('f-biddate').value,
+    bid:parseFloat(document.getElementById('f-bid').value)||null,
+    won:document.getElementById('f-won').value,
+    awarded:parseFloat(document.getElementById('f-awarded').value)||null,
+    status:document.getElementById('f-status').value,
+    notes:document.getElementById('f-notes').value.trim(),
+    driveLink:document.getElementById('f-fileref').value.trim()
+  };
+  if(!d.source||!d.type){toast('Deal Source and Deal Type are required.','error');return;}
+  const btn=document.getElementById('btn-save-deal');
+  btn.classList.add('saving');btn.disabled=true;
+  try{
+    if(editingId){
+      const updated=await updateDeal(editingId,d);
+      const i=deals.findIndex(x=>x.id===editingId);
+      if(i>=0)deals[i]=updated;
+      toast('Deal updated successfully','success');
+    }else{
+      const created=await insertDeal(d);
+      deals.unshift(created);
+      toast('Deal added successfully','success');
+    }
+    closeModal();populateLenderFilter();applyFilters();
+  }catch(e){
+    toast('Save failed: '+e.message,'error');
+  }finally{
+    btn.classList.remove('saving');btn.disabled=false;
+  }
+}
+
+function openDeleteModal(id){deletingId=id;document.getElementById('confirm-modal').classList.add('open');}
+function closeConfirm(){document.getElementById('confirm-modal').classList.remove('open');deletingId=null;}
+async function confirmDelete(){
+  if(!deletingId)return;
+  if(!supabase){toast('Not connected to Supabase','error');closeConfirm();return;}
+  try{
+    await deleteDeal(deletingId);
+    deals=deals.filter(d=>d.id!==deletingId);
+    closeConfirm();populateLenderFilter();applyFilters();
+    toast('Deal deleted','success');
+  }catch(e){
+    toast('Delete failed: '+e.message,'error');
+    closeConfirm();
+  }
+}
+
+document.getElementById('deal-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+document.getElementById('confirm-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeConfirm();});
+
+/* ══════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════ */
+document.getElementById('nav-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+
+const VRB_URL='https://fcbipuwbsdihnxkhzjva.supabase.co';
+const VRB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs';
+
+function tryInit(attempt){
+  if(attempt>20){hideLoading();toast('Could not load Supabase library. Check your internet connection.','error');return;}
+  const sb=window.supabase||window.supabaseJs;
+  if(sb&&sb.createClient){
+    initSupabase(VRB_URL,VRB_KEY);
+  }else{
+    setTimeout(()=>tryInit(attempt+1),200);
+  }
+}
+tryInit(0);
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</body>
+</html>
