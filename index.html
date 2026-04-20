@@ -1000,7 +1000,6 @@ function openAddModal(){
   document.getElementById('f-source-name-wrap').style.display='flex';
   document.getElementById('f-addr-single').value='';
   document.getElementById('f-addr-portfolio').value='';
-  document.getElementById('f-loan-count').value='';
   document.getElementById('f-states').value='';
   document.getElementById('f-tape-count').value='';
   document.getElementById('f-tape-upb').value='';
@@ -1029,7 +1028,6 @@ function openEditModal(id){
   setAddrMode(isPortfolio?'portfolio':'single');
   document.getElementById('f-addr-single').value=isPortfolio?'':d.addr||'';
   document.getElementById('f-addr-portfolio').value=isPortfolio?d.addr||'':'';
-  document.getElementById('f-loan-count').value=d.loanCount||'';
   document.getElementById('f-states').value=d.states||'';
   document.getElementById('f-tape-count').value=d.tapeCount||'';
   document.getElementById('f-tape-upb').value=d.tapeUpb||'';
@@ -1058,21 +1056,25 @@ function closeModal(){document.getElementById('deal-modal').classList.remove('op
 
 async function saveDeal(){
   if(!supabase){toast('Not connected to Supabase','error');return;}
+  const isPortfolio=document.getElementById('addr-portfolio-wrap').style.display!=='none';
+  let dealType='';
+  if(isPortfolio){
+    const types=[];
+    if(document.getElementById('f-type-res').checked)types.push('Residential');
+    if(document.getElementById('f-type-mf').checked)types.push('Multifamily');
+    if(document.getElementById('f-type-hotel').checked)types.push('Hotel');
+    dealType=types.join(', ')||'Mixed';
+  }else{
+    dealType=document.getElementById('f-type').value;
+  }
   const d={
     source:document.getElementById('f-source-type').value==='direct'?'Direct':document.getElementById('f-source').value.trim(),
     lender:document.getElementById('f-lender').value.trim(),
-    isPortfolio:document.getElementById('addr-portfolio-wrap').style.display!=='none',
-    get type(){
-      if(!this.isPortfolio) return document.getElementById('f-type').value;
-      const types=[];
-      if(document.getElementById('f-type-res').checked)types.push('Residential');
-      if(document.getElementById('f-type-mf').checked)types.push('Multifamily');
-      if(document.getElementById('f-type-hotel').checked)types.push('Hotel');
-      return types.join(', ')||'Mixed';
-    },
-    addr:(document.getElementById('addr-portfolio-wrap').style.display!=='none'
+    isPortfolio:isPortfolio,
+    type:dealType,
+    addr:isPortfolio
       ?document.getElementById('f-addr-portfolio').value.trim()
-      :document.getElementById('f-addr-single').value.trim()),
+      :document.getElementById('f-addr-single').value.trim(),
     loanCount:document.getElementById('f-loan-count').value?parseInt(document.getElementById('f-loan-count').value):null,
     states:document.getElementById('f-states').value.trim(),
     tapeCount:parseFloat(document.getElementById('f-tape-count').value)||null,
@@ -1088,7 +1090,8 @@ async function saveDeal(){
     notes:document.getElementById('f-notes').value.trim(),
     driveLink:document.getElementById('f-fileref').value.trim()
   };
-  if(!d.type){toast('Deal Type is required.','error');return;}if(!d.source){toast('Deal Source is required.','error');return;}
+  if(!d.type){toast('Deal Type is required.','error');return;}
+  if(!d.source){toast('Deal Source is required.','error');return;}
   const btn=document.getElementById('btn-save-deal');
   btn.classList.add('saving');btn.disabled=true;
   try{
