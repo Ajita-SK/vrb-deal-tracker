@@ -347,12 +347,26 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
           <label>Lender (Bank / Private Lender)</label>
           <input type="text" id="f-lender" placeholder="e.g. JPMorgan Chase, ABC Capital Fund">
         </div>
-        <div class="form-group">
+        <div class="form-group" id="type-single-wrap">
           <label>Deal Type</label>
           <select id="f-type">
             <option value="">Select type</option>
             <option>Residential</option><option>Multifamily</option><option>Hotel</option>
           </select>
+        </div>
+        <div class="form-group" id="type-multi-wrap" style="display:none">
+          <label>Asset Mix in Portfolio</label>
+          <div style="display:flex;gap:12px;padding:10px 14px;border:1px solid #D9E1F2;border-radius:6px;background:#F7F9FD">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:#1F3864;cursor:pointer">
+              <input type="checkbox" id="f-type-res" value="Residential" style="width:15px;height:15px;accent-color:#1F3864"> 🏠 Residential
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:#1F3864;cursor:pointer">
+              <input type="checkbox" id="f-type-mf" value="Multifamily" style="width:15px;height:15px;accent-color:#1F3864"> 🏢 Multifamily
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:#1F3864;cursor:pointer">
+              <input type="checkbox" id="f-type-hotel" value="Hotel" style="width:15px;height:15px;accent-color:#1F3864"> 🏨 Hotel
+            </label>
+          </div>
         </div>
         <div class="form-group">
           <label>Status</label>
@@ -683,7 +697,10 @@ function getFiltered(){
   const won=document.getElementById('filter-won').value;
   const typeMap={res:'Residential',mf:'Multifamily',hotel:'Hotel'};
   return deals.filter(d=>{
-    if(['res','mf','hotel'].includes(activeTab)&&d.type!==typeMap[activeTab])return false;
+    if(['res','mf','hotel'].includes(activeTab)){
+      const types=(d.type||'').split(', ').map(x=>x.trim());
+      if(!types.includes(typeMap[activeTab]))return false;
+    }
     if(src&&d.lender!==src)return false;
     if(broker&&d.source!==broker)return false;
     if(st&&d.status!==st)return false;
@@ -721,9 +738,12 @@ function mileBar(dl){
   return`<div class="milestone"><div class="mile-bar"><div class="mile-fill ${cls}" style="width:${pct}%"></div></div></div>`;
 }
 function typeBadge(t){
+  if(!t)return'';
   const m={Residential:'badge-res',Multifamily:'badge-mf',Hotel:'badge-hotel'};
   const ic={Residential:'🏠',Multifamily:'🏢',Hotel:'🏨'};
-  return`<span class="badge ${m[t]||''}">${ic[t]||''} ${t}</span>`;
+  const types=t.split(', ').map(x=>x.trim()).filter(Boolean);
+  if(types.length<=1)return`<span class="badge ${m[t]||'badge-active'}">${ic[t]||''} ${t}</span>`;
+  return types.map(x=>`<span class="badge ${m[x]||'badge-active'}" style="margin-right:2px">${ic[x]||''} ${x}</span>`).join('');
 }
 function wonBadge(w){
   const m={Yes:'badge-yes',No:'badge-no',Pending:'badge-pending'};
@@ -804,9 +824,9 @@ function updateKPIs(){
   document.getElementById('kpi-lost').textContent=lost;
   document.getElementById('kpi-pending').textContent=pend;
   document.getElementById('tc-all').textContent=deals.length;
-  document.getElementById('tc-res').textContent=deals.filter(d=>d.type==='Residential').length;
-  document.getElementById('tc-mf').textContent=deals.filter(d=>d.type==='Multifamily').length;
-  document.getElementById('tc-hotel').textContent=deals.filter(d=>d.type==='Hotel').length;
+  document.getElementById('tc-res').textContent=deals.filter(d=>(d.type||'').includes('Residential')).length;
+  document.getElementById('tc-mf').textContent=deals.filter(d=>(d.type||'').includes('Multifamily')).length;
+  document.getElementById('tc-hotel').textContent=deals.filter(d=>(d.type||'').includes('Hotel')).length;
 }
 function populateLenderFilter(){
   const sel=document.getElementById('filter-source');
@@ -910,6 +930,13 @@ function setAddrMode(mode){
   document.getElementById('toggle-single').style.color=isSingle?'#fff':'#1F3864';
   document.getElementById('toggle-portfolio').style.background=isSingle?'#fff':'#1F3864';
   document.getElementById('toggle-portfolio').style.color=isSingle?'#1F3864':'#fff';
+  document.getElementById('type-single-wrap').style.display=isSingle?'flex':'none';
+  document.getElementById('type-multi-wrap').style.display=isSingle?'none':'flex';
+  if(!isSingle){
+    document.getElementById('f-type-res').checked=false;
+    document.getElementById('f-type-mf').checked=false;
+    document.getElementById('f-type-hotel').checked=false;
+  }
 }
 
 /* ══════════════════════════════════════════
@@ -928,6 +955,10 @@ function openAddModal(){
   document.getElementById('f-addr-portfolio').value='';
   document.getElementById('f-loan-count').value='';
   document.getElementById('f-states').value='';
+  document.getElementById('f-type').value='';
+  document.getElementById('f-type-res').checked=false;
+  document.getElementById('f-type-mf').checked=false;
+  document.getElementById('f-type-hotel').checked=false;
   setAddrMode('single');
   document.getElementById('deal-modal').classList.add('open');
 }
@@ -947,6 +978,14 @@ function openEditModal(id){
   document.getElementById('f-addr-portfolio').value=isPortfolio?d.addr||'':'';
   document.getElementById('f-loan-count').value=d.loanCount||'';
   document.getElementById('f-states').value=d.states||'';
+  if(isPortfolio){
+    const types=(d.type||'').split(', ');
+    document.getElementById('f-type-res').checked=types.includes('Residential');
+    document.getElementById('f-type-mf').checked=types.includes('Multifamily');
+    document.getElementById('f-type-hotel').checked=types.includes('Hotel');
+  } else {
+    document.getElementById('f-type').value=d.type||'';
+  }
   document.getElementById('f-upb').value=d.upb||'';
   document.getElementById('f-biddate').value=d.bidDate||'';
   document.getElementById('f-bid').value=d.bid||'';
@@ -964,8 +1003,15 @@ async function saveDeal(){
   const d={
     source:document.getElementById('f-source-type').value==='direct'?'Direct':document.getElementById('f-source').value.trim(),
     lender:document.getElementById('f-lender').value.trim(),
-    type:document.getElementById('f-type').value,
     isPortfolio:document.getElementById('addr-portfolio-wrap').style.display!=='none',
+    get type(){
+      if(!this.isPortfolio) return document.getElementById('f-type').value;
+      const types=[];
+      if(document.getElementById('f-type-res').checked)types.push('Residential');
+      if(document.getElementById('f-type-mf').checked)types.push('Multifamily');
+      if(document.getElementById('f-type-hotel').checked)types.push('Hotel');
+      return types.join(', ')||'Mixed';
+    },
     addr:(document.getElementById('addr-portfolio-wrap').style.display!=='none'
       ?document.getElementById('f-addr-portfolio').value.trim()
       :document.getElementById('f-addr-single').value.trim()),
