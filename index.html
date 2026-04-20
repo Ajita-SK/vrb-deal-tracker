@@ -1079,7 +1079,7 @@ async function saveDeal(){
     addr:isPortfolio
       ?document.getElementById('f-addr-portfolio').value.trim()
       :document.getElementById('f-addr-single').value.trim(),
-    loanCount:document.getElementById('f-loan-count').value?parseInt(document.getElementById('f-loan-count').value):null,
+    loanCount:null,
     states:document.getElementById('f-states').value.trim(),
     tapeCount:parseFloat(document.getElementById('f-tape-count').value)||null,
     tapeUpb:parseFloat(document.getElementById('f-tape-upb').value)||null,
