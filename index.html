@@ -1012,6 +1012,7 @@ function openAddModal(){
   document.getElementById('f-type-mf').checked=false;
   document.getElementById('f-type-hotel').checked=false;
   setAddrMode('single');
+  const sba=document.getElementById('btn-save-deal');if(sba){sba.disabled=false;sba.classList.remove('saving');}
   document.getElementById('deal-modal').classList.add('open');
 }
 function openEditModal(id){
@@ -1050,12 +1051,15 @@ function openEditModal(id){
   document.getElementById('f-status').value=d.status||'Active';
   document.getElementById('f-notes').value=d.notes||'';
   document.getElementById('f-fileref').value=d.driveLink||'';
+  const sb=document.getElementById('btn-save-deal');if(sb){sb.disabled=false;sb.classList.remove('saving');}
   document.getElementById('deal-modal').classList.add('open');
 }
 function closeModal(){document.getElementById('deal-modal').classList.remove('open');}
 
 async function saveDeal(){
   if(!supabase){toast('Not connected to Supabase','error');return;}
+  const btn=document.getElementById('btn-save-deal');
+  btn.disabled=false;btn.classList.remove('saving');
   const isPortfolio=document.getElementById('addr-portfolio-wrap').style.display!=='none';
   let dealType='';
   if(isPortfolio){
@@ -1065,7 +1069,7 @@ async function saveDeal(){
     if(document.getElementById('f-type-hotel').checked)types.push('Hotel');
     dealType=types.join(', ')||'Mixed';
   }else{
-    dealType=document.getElementById('f-type').value;
+    dealType=document.getElementById('f-type').value||'';
   }
   const d={
     source:document.getElementById('f-source-type').value==='direct'?'Direct':document.getElementById('f-source').value.trim(),
@@ -1090,9 +1094,8 @@ async function saveDeal(){
     notes:document.getElementById('f-notes').value.trim(),
     driveLink:document.getElementById('f-fileref').value.trim()
   };
-  if(!d.type){toast('Deal Type is required.','error');return;}
-  if(!d.source){toast('Deal Source is required.','error');return;}
-  const btn=document.getElementById('btn-save-deal');
+  if(!d.source){toast('Deal Source / Broker is required.','error');return;}
+  if(!d.type)d.type='';
   btn.classList.add('saving');btn.disabled=true;
   try{
     if(editingId){
