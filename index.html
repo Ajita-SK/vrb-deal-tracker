@@ -279,6 +279,7 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
             <th>Bid Won?</th>
             <th>Notes</th>
             <th>Drive Folder</th>
+            <th>Bigin CRM</th>
             <th>Actions</th>
           </tr></thead>
           <tbody id="deal-tbody"></tbody>
@@ -442,9 +443,13 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
           <label>Awarded Amount ($) — if won</label>
           <input type="number" id="f-awarded" placeholder="e.g. 975000">
         </div>
-        <div class="form-group full">
+        <div class="form-group">
           <label>Google Drive Link</label>
           <input type="url" id="f-fileref" placeholder="https://drive.google.com/drive/folders/...">
+        </div>
+        <div class="form-group">
+          <label>Bigin CRM Link</label>
+          <input type="url" id="f-bigin" placeholder="https://bigin.zoho.com/...">
         </div>
         <div class="form-group full">
           <label>Notes</label>
@@ -527,7 +532,8 @@ function mapRow(r){
     awarded:r.awarded||null,
     status:r.status||'Active',
     notes:r.notes||'',
-    driveLink:r.drive_link||''
+    driveLink:r.drive_link||'',
+    biginLink:r.bigin_link||''
   };
 }
 function toRow(d){
@@ -550,7 +556,8 @@ function toRow(d){
     awarded:d.awarded||null,
     status:d.status,
     notes:d.notes||null,
-    drive_link:d.driveLink||null
+    drive_link:d.driveLink||null,
+    bigin_link:d.biginLink||null
   };
 }
 async function loadDeals(){
@@ -689,11 +696,11 @@ function downloadICS(id){
    ══════════════════════════════════════════ */
 function exportCSV(){
   const rows=getFiltered();
-  const headers=['Deal Source / Broker','Lender','Deal Type','Address','UPB ($)','Bid Due Date','Days Left','Status','Our Bid ($)','Bid % of UPB','Bid Won?','Awarded Amt ($)','Notes','Google Drive Link'];
+  const headers=['Deal Source / Broker','Lender','Deal Type','Address','UPB ($)','Bid Due Date','Days Left','Status','Our Bid ($)','Bid % of UPB','Bid Won?','Awarded Amt ($)','Notes','Google Drive Link','Bigin CRM Link'];
   const csv=[headers,...rows.map(d=>{
     const dl=daysLeft(d.bidDate);
     const ratio=bidRatio(d.bid,d.upb);
-    return[d.source,d.lender||'',d.type,d.addr,d.upb||'',fmtDate(d.bidDate),dl!==null?dl:'',d.status,d.bid||'',ratio!==null?ratio+'%':'',d.won,d.awarded||'',d.notes||'',d.driveLink||''];
+    return[d.source,d.lender||'',d.type,d.addr,d.upb||'',fmtDate(d.bidDate),dl!==null?dl:'',d.status,d.bid||'',ratio!==null?ratio+'%':'',d.won,d.awarded||'',d.notes||'',d.driveLink||'',d.biginLink||''];
   })].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
@@ -800,13 +807,17 @@ function renderTable(){
   const q=(document.getElementById('search-input').value||'').toLowerCase();
   document.getElementById('result-count').textContent=`${rows.length} deal${rows.length!==1?'s':''} shown`;
   const tbody=document.getElementById('deal-tbody');
-  if(!rows.length){tbody.innerHTML=`<tr><td colspan="14" class="no-results">${supabase?'No deals match your filters.':'Connect to Supabase to load deals.'}</td></tr>`;return;}
+  if(!rows.length){tbody.innerHTML=`<tr><td colspan="15" class="no-results">${supabase?'No deals match your filters.':'Connect to Supabase to load deals.'}</td></tr>`;return;}
   tbody.innerHTML=rows.map(d=>{
     const dl=daysLeft(d.bidDate);
     const hasDate=d.bidDate&&d.won==='Pending'&&d.status==='Active';
     const driveCell=d.driveLink
       ?`<a href="${d.driveLink}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;color:#2E5FA3;font-size:11px;font-weight:600;text-decoration:none;border:1px solid #D9E1F2;border-radius:5px;padding:3px 8px;background:#F0F6FF">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Open</a>`
+      :`<span style="color:#ccc;font-size:11px">—</span>`;
+    const biginCell=d.biginLink
+      ?`<a href="${d.biginLink}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;color:#7c3aed;font-size:11px;font-weight:600;text-decoration:none;border:1px solid #e9d5ff;border-radius:5px;padding:3px 8px;background:#f5f3ff">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Bigin</a>`
       :`<span style="color:#ccc;font-size:11px">—</span>`;
     return`<tr>
       <td>
@@ -834,6 +845,7 @@ function renderTable(){
       <td>${wonBadge(d.won)}</td>
       <td style="max-width:180px;font-size:11px;color:#6b7c9a">${hl(d.notes||'',q)}</td>
       <td>${driveCell}</td>
+      <td>${biginCell}</td>
       <td><div class="action-btns">
         <button class="btn-edit" onclick="openEditModal(${d.id})">Edit</button>
         <button class="btn-del" onclick="openDeleteModal(${d.id})">Del</button>
@@ -993,7 +1005,7 @@ function calcSelectionRatio(){
 function openAddModal(){
   editingId=null;
   document.getElementById('modal-title').textContent='Add New Deal';
-  ['source','lender','type','upb','biddate','bid','won','awarded','status','notes','fileref'].forEach(f=>{
+  ['source','lender','type','upb','biddate','bid','won','awarded','status','notes','fileref','bigin'].forEach(f=>{
     const el=document.getElementById('f-'+f);
     if(el)el.value=f==='won'?'Pending':f==='status'?'Active':'';
   });
@@ -1052,6 +1064,7 @@ function openEditModal(id){
   document.getElementById('f-status').value=d.status||'Active';
   document.getElementById('f-notes').value=d.notes||'';
   document.getElementById('f-fileref').value=d.driveLink||'';
+  document.getElementById('f-bigin').value=d.biginLink||'';
   const sb=document.getElementById('btn-save-deal');if(sb){sb.disabled=false;sb.classList.remove('saving');}
   document.getElementById('deal-modal').classList.add('open');
 }
@@ -1093,7 +1106,8 @@ async function saveDeal(){
     awarded:parseFloat(document.getElementById('f-awarded').value)||null,
     status:document.getElementById('f-status').value,
     notes:document.getElementById('f-notes').value.trim(),
-    driveLink:document.getElementById('f-fileref').value.trim()
+    driveLink:document.getElementById('f-fileref').value.trim(),
+    biginLink:document.getElementById('f-bigin').value.trim()
   };
   if(!d.source){toast('Deal Source / Broker is required.','error');return;}
   if(!d.type)d.type='';
