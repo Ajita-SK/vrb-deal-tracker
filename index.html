@@ -2,24 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<script>
-(function(){
-  var urls=[
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js',
-    'https://unpkg.com/@supabase/supabase-js@2.39.3/dist/umd/supabase.js'
-  ];
-  var i=0;
-  function tryLoad(){
-    if(i>=urls.length)return;
-    var s=document.createElement('script');
-    s.src=urls[i++];
-    s.onload=function(){if(!window.supabase||!window.supabase.createClient)tryLoad();};
-    s.onerror=function(){tryLoad();};
-    document.head.appendChild(s);
-  }
-  tryLoad();
-})();
-</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VRB Capital — Deal Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -452,14 +434,11 @@ let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,aler
   initSupabase(url,key);
 }
 function initSupabase(url,key){
-  try{
-    supabase=window.supabase.createClient(url,key);
-    setStatus(true);
-    loadDeals();
-  }catch(e){
-    toast('Connection failed: '+e.message,'error');
-    setStatus(false);
-  }
+  window._sb_url=url;
+  window._sb_key=key;
+  setStatus(true);
+  loadDeals();
+}
 }
 function setStatus(ok){
   const el=document.getElementById('nav-status');
@@ -524,32 +503,49 @@ function toRow(d){
 async function loadDeals(){
   showLoading('Loading deals...');
   try{
-    const{data,error}=await supabase.from('deals').select('*').order('id',{ascending:false});
-    if(error)throw error;
+    const r=await fetch(window._sb_url+'/rest/v1/deals?order=id.desc',{
+      headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key}
+    });
+    if(!r.ok){const e=await r.json();throw new Error(e.message||e.error||'Load failed');}
+    const data=await r.json();
     deals=data.map(mapRow);
     hideLoading();
     populateLenderFilter();
     applyFilters();
-    toast(`${deals.length} deals loaded`,'success');
+    toast(deals.length+' deals loaded','success');
   }catch(e){
     hideLoading();
-    toast('Error loading deals: '+e.message,'error');
+    toast('Error: '+e.message,'error');
     setStatus(false);
   }
 }
+}
 async function insertDeal(d){
-  const{data,error}=await supabase.from('deals').insert([toRow(d)]).select().single();
-  if(error)throw error;
-  return mapRow(data);
+  const r=await fetch(window._sb_url+'/rest/v1/deals',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Prefer':'return=representation'},
+    body:JSON.stringify(toRow(d))
+  });
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
+  return mapRow(Array.isArray(data)?data[0]:data);
 }
 async function updateDeal(id,d){
-  const{data,error}=await supabase.from('deals').update(toRow(d)).eq('id',id).select().single();
-  if(error)throw error;
-  return mapRow(data);
+  const r=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json','apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Prefer':'return=representation'},
+    body:JSON.stringify(toRow(d))
+  });
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
+  return mapRow(Array.isArray(data)?data[0]:data);
 }
 async function deleteDeal(id){
-  const{error}=await supabase.from('deals').delete().eq('id',id);
-  if(error)throw error;
+  const r=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
+    method:'DELETE',
+    headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key}
+  });
+  if(!r.ok){const d=await r.json();throw new Error(d.message||d.error||'Delete failed');}
 }
 
 /* ══════════════════════════════════════════
@@ -832,15 +828,20 @@ function toggleWatchFilter(){
 }
 async function toggleWatch(id){
   const d=deals.find(x=>x.id===id);
-  if(!d||!supabase)return;
+  if(!d)return;
   const newVal=!d.watching;
   try{
-    const{error}=await supabase.from('deals').update({watching:newVal}).eq('id',id);
-    if(error)throw error;
+    const r=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json','apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key},
+      body:JSON.stringify({watching:newVal})
+    });
+    if(!r.ok){const e=await r.json();throw new Error(e.message||'Watch update failed');}
     d.watching=newVal;
     applyFilters();
     toast(newVal?'⭐ Added to watchlist':'Removed from watchlist',newVal?'success':'info');
   }catch(e){toast('Failed: '+e.message,'error');}
+}
 }
 function applyFilters(){renderTable();updateKPIs();renderAlerts();}
 
@@ -1015,22 +1016,8 @@ document.getElementById('nav-date').textContent=new Date().toLocaleDateString('e
 
 
 
-const _URL='https://fcbipuwbsdihnxkhzjva.supabase.co';
-const _KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs';
-function waitForSupabase(tries){
-  if(tries>50){
-    hideLoading();
-    document.getElementById('loading-text').textContent='Connection failed. Please refresh.';
-    return;
-  }
-  if(window.supabase&&window.supabase.createClient){
-    initSupabase(_URL,_KEY);
-  }else{
-    setTimeout(function(){waitForSupabase(tries+1);},200);
-  }
-}
 window.addEventListener('DOMContentLoaded',function(){
-  waitForSupabase(0);
+  initSupabase('https://fcbipuwbsdihnxkhzjva.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs');
 });
 </script>
 </body>
