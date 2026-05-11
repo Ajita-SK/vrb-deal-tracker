@@ -10,16 +10,6 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#F0F4FA;color:#1a1a2e;min-height:100vh}
 
-/* ── CONFIG BANNER ── */
-.config-banner{background:#7a4700;color:#fff;padding:10px 32px;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-.config-banner.hidden{display:none}
-.config-banner strong{font-size:13px}
-.config-banner a{color:#FFC;text-decoration:underline;cursor:pointer}
-.config-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
-.config-form input{border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:5px 10px;font-size:12px;background:rgba(255,255,255,.15);color:#fff;width:280px;outline:none}
-.config-form input::placeholder{color:rgba(255,255,255,.6)}
-.config-form input:focus{border-color:#fff}
-.btn-config-save{background:#fff;color:#7a4700;border:none;border-radius:5px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer}
 
 /* ── TOAST ── */
 .toast{position:fixed;bottom:24px;right:24px;z-index:999;background:#1F3864;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none;max-width:320px}
@@ -208,18 +198,6 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<!-- CONFIG BANNER — shown until keys are set -->
-<div class="config-banner" id="config-banner">
-  <div>
-    <strong>⚙ Supabase not configured</strong> — paste your Project URL and anon key below to connect.
-    <a onclick="document.getElementById('config-form-wrap').style.display=document.getElementById('config-form-wrap').style.display==='none'?'flex':'none'"> Toggle</a>
-  </div>
-  <div id="config-form-wrap" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <input id="cfg-url" placeholder="https://xxxx.supabase.co" autocomplete="off">
-    <input id="cfg-key" placeholder="anon public key" autocomplete="off">
-    <button class="btn-config-save" onclick="saveConfig()">Connect</button>
-  </div>
-</div>
 
 <div class="nav">
   <div class="nav-logo">VRB Capital <span>Deal Tracker</span></div>
@@ -449,25 +427,16 @@ const NAVY='#1F3864',BLUE='#2E5FA3',GREEN='#27ae60',AMBER='#f39c12',RED='#e74c3c
 /* ══════════════════════════════════════════
    SUPABASE CONFIG
    ══════════════════════════════════════════ */
-const STORAGE_KEY='vrb_supabase_config';
 let supabase=null;
 let deals=[];
 let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,alertsVisible=true,charts={},watchFilterOn=false;
 
-function loadConfig(){
-  try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');}catch{return null;}
-}
-function saveConfig(){
-  const url=document.getElementById('cfg-url').value.trim();
-  const key=document.getElementById('cfg-key').value.trim();
-  if(!url||!key){toast('Please enter both URL and key','error');return;}
   localStorage.setItem(STORAGE_KEY,JSON.stringify({url,key}));
   initSupabase(url,key);
 }
 function initSupabase(url,key){
   try{
     supabase=window.supabase.createClient(url,key);
-    document.getElementById('config-banner').classList.add('hidden');
     setStatus(true);
     loadDeals();
   }catch(e){
@@ -1027,15 +996,18 @@ document.getElementById('confirm-modal').addEventListener('click',e=>{if(e.targe
    ══════════════════════════════════════════ */
 document.getElementById('nav-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
-const cfg=loadConfig();
-if(cfg&&cfg.url&&cfg.key){
-  document.getElementById('cfg-url').value=cfg.url;
-  document.getElementById('cfg-key').value=cfg.key;
-  initSupabase(cfg.url,cfg.key);
-}else{
-  hideLoading();
-  applyFilters();
-}
+
+
+const _URL='https://fcbipuwbsdihnxkhzjva.supabase.co';
+const _KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs';
+window.addEventListener('load',function(){
+  if(window.supabase&&window.supabase.createClient){
+    initSupabase(_URL,_KEY);
+  }else{
+    hideLoading();
+    alert('Supabase library failed to load. Please refresh the page.');
+  }
+});
 </script>
 </body>
 </html>
