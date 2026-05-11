@@ -189,7 +189,7 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
 <body>
 
 <!-- LOADING -->
-<div class="loading-overlay" id="loading-overlay">
+<div class="loading-overlay hidden" id="loading-overlay">
   <div class="spinner"></div>
   <div class="loading-text" id="loading-text">Connecting to database...</div>
 </div>
@@ -501,10 +501,34 @@ function toRow(d){
   };
 }
 async function loadDeals(){
-  showLoading('Loading deals...');
+  document.getElementById('loading-overlay').classList.remove('hidden');
+  document.getElementById('loading-text').textContent='Loading deals...';
   try{
-    const r=await fetch(window._sb_url+'/rest/v1/deals?order=id.desc',{
-      headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key}
+    const resp=await fetch(window._sb_url+'/rest/v1/deals?order=id.desc&select=*',{
+      method:'GET',
+      headers:{
+        'apikey':window._sb_key,
+        'Authorization':'Bearer '+window._sb_key,
+        'Content-Type':'application/json'
+      }
+    });
+    if(!resp.ok){
+      const txt=await resp.text();
+      throw new Error('HTTP '+resp.status+': '+txt);
+    }
+    const data=await resp.json();
+    deals=(data||[]).map(mapRow);
+    document.getElementById('loading-overlay').classList.add('hidden');
+    populateLenderFilter();
+    applyFilters();
+    toast(deals.length+' deals loaded','success');
+  }catch(e){
+    document.getElementById('loading-overlay').classList.add('hidden');
+    setStatus(false);
+    toast('Load error: '+e.message,'error');
+    console.error('loadDeals error:',e);
+  }
+}
     });
     if(!r.ok){const e=await r.json();throw new Error(e.message||e.error||'Load failed');}
     const data=await r.json();
@@ -521,29 +545,48 @@ async function loadDeals(){
 }
 }
 async function insertDeal(d){
-  const r=await fetch(window._sb_url+'/rest/v1/deals',{
+  const resp=await fetch(window._sb_url+'/rest/v1/deals',{
     method:'POST',
-    headers:{'Content-Type':'application/json','apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Prefer':'return=representation'},
+    headers:{
+      'apikey':window._sb_key,
+      'Authorization':'Bearer '+window._sb_key,
+      'Content-Type':'application/json',
+      'Prefer':'return=representation'
+    },
     body:JSON.stringify(toRow(d))
   });
-  const data=await r.json();
-  if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
+  const data=await resp.json();
+  if(!resp.ok)throw new Error(data.message||data.error||'Insert failed: '+resp.status);
   return mapRow(Array.isArray(data)?data[0]:data);
 }
 async function updateDeal(id,d){
-  const r=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
+  const resp=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
     method:'PATCH',
-    headers:{'Content-Type':'application/json','apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Prefer':'return=representation'},
+    headers:{
+      'apikey':window._sb_key,
+      'Authorization':'Bearer '+window._sb_key,
+      'Content-Type':'application/json',
+      'Prefer':'return=representation'
+    },
     body:JSON.stringify(toRow(d))
   });
-  const data=await r.json();
-  if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
+  const data=await resp.json();
+  if(!resp.ok)throw new Error(data.message||data.error||'Update failed: '+resp.status);
   return mapRow(Array.isArray(data)?data[0]:data);
 }
 async function deleteDeal(id){
-  const r=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
+  const resp=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
     method:'DELETE',
-    headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key}
+    headers:{
+      'apikey':window._sb_key,
+      'Authorization':'Bearer '+window._sb_key
+    }
+  });
+  if(!resp.ok){
+    const txt=await resp.text();
+    throw new Error('Delete failed: '+resp.status+' '+txt);
+  }
+}
   });
   if(!r.ok){const d=await r.json();throw new Error(d.message||d.error||'Delete failed');}
 }
@@ -830,13 +873,20 @@ async function toggleWatch(id){
   const d=deals.find(x=>x.id===id);
   if(!d)return;
   const newVal=!d.watching;
-  try{
-    const r=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
-      method:'PATCH',
-      headers:{'Content-Type':'application/json','apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key},
-      body:JSON.stringify({watching:newVal})
-    });
-    if(!r.ok){const e=await r.json();throw new Error(e.message||'Watch update failed');}
+  const resp=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
+    method:'PATCH',
+    headers:{
+      'apikey':window._sb_key,
+      'Authorization':'Bearer '+window._sb_key,
+      'Content-Type':'application/json'
+    },
+    body:JSON.stringify({watching:newVal})
+  });
+  if(!resp.ok){toast('Watch update failed','error');return;}
+  d.watching=newVal;
+  applyFilters();
+  toast(newVal?'⭐ Added to watchlist':'Removed from watchlist',newVal?'success':'info');
+}
     d.watching=newVal;
     applyFilters();
     toast(newVal?'⭐ Added to watchlist':'Removed from watchlist',newVal?'success':'info');
