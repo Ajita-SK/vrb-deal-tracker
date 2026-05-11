@@ -430,9 +430,6 @@ let supabase=null;
 let deals=[];
 let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,alertsVisible=true,charts={},watchFilterOn=false;
 
-  localStorage.setItem(STORAGE_KEY,JSON.stringify({url,key}));
-  initSupabase(url,key);
-}
 function initSupabase(url,key){
   try{
     window._sbc = window.supabase.createClient(url, key);
@@ -445,7 +442,6 @@ function initSupabase(url,key){
     setStatus(true);
     loadDeals();
   }
-}
 }
 function setStatus(ok){
   const el=document.getElementById('nav-status');
