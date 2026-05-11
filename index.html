@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VRB Capital — Deal Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -434,10 +435,17 @@ let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,aler
   initSupabase(url,key);
 }
 function initSupabase(url,key){
-  window._sb_url=url;
-  window._sb_key=key;
-  setStatus(true);
-  loadDeals();
+  try{
+    window._sbc = window.supabase.createClient(url, key);
+    setStatus(true);
+    loadDeals();
+  } catch(e){
+    // library not loaded yet, use fetch fallback
+    window._sb_url=url;
+    window._sb_key=key;
+    setStatus(true);
+    loadDeals();
+  }
 }
 }
 function setStatus(ok){
@@ -504,13 +512,30 @@ async function loadDeals(){
   document.getElementById('loading-overlay').classList.remove('hidden');
   document.getElementById('loading-text').textContent='Loading deals...';
   try{
-    const resp=await fetch(window._sb_url+'/rest/v1/deals?order=id.desc&select=*',{
-      method:'GET',
-      headers:{
-        'apikey':window._sb_key,
-        'Authorization':'Bearer '+window._sb_key,
-        'Content-Type':'application/json'
-      }
+    let data, error;
+    if(window._sbc){
+      const res = await window._sbc.from('deals').select('*').order('id', {ascending:false});
+      data = res.data; error = res.error;
+    } else {
+      const resp = await fetch(window._sb_url+'/rest/v1/deals?order=id.desc&select=*', {
+        headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Accept':'application/json'}
+      });
+      data = await resp.json();
+      if(!resp.ok) error = {message: JSON.stringify(data)};
+    }
+    if(error) throw new Error(error.message);
+    deals = (data||[]).map(mapRow);
+    document.getElementById('loading-overlay').classList.add('hidden');
+    setStatus(true);
+    populateLenderFilter();
+    applyFilters();
+    toast(deals.length+' deals loaded','success');
+  } catch(e){
+    document.getElementById('loading-overlay').classList.add('hidden');
+    setStatus(false);
+    toast('Load error: '+e.message,'error');
+  }
+}
     });
     if(!resp.ok){
       const txt=await resp.text();
@@ -519,6 +544,7 @@ async function loadDeals(){
     const data=await resp.json();
     deals=(data||[]).map(mapRow);
     document.getElementById('loading-overlay').classList.add('hidden');
+    setStatus(true);
     populateLenderFilter();
     applyFilters();
     toast(deals.length+' deals loaded','success');
@@ -545,42 +571,49 @@ async function loadDeals(){
 }
 }
 async function insertDeal(d){
-  const resp=await fetch(window._sb_url+'/rest/v1/deals',{
-    method:'POST',
-    headers:{
-      'apikey':window._sb_key,
-      'Authorization':'Bearer '+window._sb_key,
-      'Content-Type':'application/json',
-      'Prefer':'return=representation'
-    },
-    body:JSON.stringify(toRow(d))
-  });
-  const data=await resp.json();
-  if(!resp.ok)throw new Error(data.message||data.error||'Insert failed: '+resp.status);
-  return mapRow(Array.isArray(data)?data[0]:data);
+  if(window._sbc){
+    const {data,error} = await window._sbc.from('deals').insert([toRow(d)]).select().single();
+    if(error) throw new Error(error.message);
+    return mapRow(data);
+  } else {
+    const resp = await fetch(window._sb_url+'/rest/v1/deals', {
+      method:'POST',
+      headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Content-Type':'application/json','Prefer':'return=representation'},
+      body:JSON.stringify(toRow(d))
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.message||'Insert failed');
+    return mapRow(Array.isArray(data)?data[0]:data);
+  }
 }
 async function updateDeal(id,d){
-  const resp=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
-    method:'PATCH',
-    headers:{
-      'apikey':window._sb_key,
-      'Authorization':'Bearer '+window._sb_key,
-      'Content-Type':'application/json',
-      'Prefer':'return=representation'
-    },
-    body:JSON.stringify(toRow(d))
-  });
-  const data=await resp.json();
-  if(!resp.ok)throw new Error(data.message||data.error||'Update failed: '+resp.status);
-  return mapRow(Array.isArray(data)?data[0]:data);
+  if(window._sbc){
+    const {data,error} = await window._sbc.from('deals').update(toRow(d)).eq('id',id).select().single();
+    if(error) throw new Error(error.message);
+    return mapRow(data);
+  } else {
+    const resp = await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id, {
+      method:'PATCH',
+      headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Content-Type':'application/json','Prefer':'return=representation'},
+      body:JSON.stringify(toRow(d))
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.message||'Update failed');
+    return mapRow(Array.isArray(data)?data[0]:data);
+  }
 }
 async function deleteDeal(id){
-  const resp=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
-    method:'DELETE',
-    headers:{
-      'apikey':window._sb_key,
-      'Authorization':'Bearer '+window._sb_key
-    }
+  if(window._sbc){
+    const {error} = await window._sbc.from('deals').delete().eq('id',id);
+    if(error) throw new Error(error.message);
+  } else {
+    const resp = await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id, {
+      method:'DELETE',
+      headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key}
+    });
+    if(!resp.ok) throw new Error('Delete failed: '+resp.status);
+  }
+}
   });
   if(!resp.ok){
     const txt=await resp.text();
@@ -871,18 +904,25 @@ function toggleWatchFilter(){
 }
 async function toggleWatch(id){
   const d=deals.find(x=>x.id===id);
-  if(!d)return;
+  if(!d) return;
   const newVal=!d.watching;
-  const resp=await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id,{
-    method:'PATCH',
-    headers:{
-      'apikey':window._sb_key,
-      'Authorization':'Bearer '+window._sb_key,
-      'Content-Type':'application/json'
-    },
-    body:JSON.stringify({watching:newVal})
-  });
-  if(!resp.ok){toast('Watch update failed','error');return;}
+  try{
+    if(window._sbc){
+      const {error} = await window._sbc.from('deals').update({watching:newVal}).eq('id',id);
+      if(error) throw new Error(error.message);
+    } else {
+      const resp = await fetch(window._sb_url+'/rest/v1/deals?id=eq.'+id, {
+        method:'PATCH',
+        headers:{'apikey':window._sb_key,'Authorization':'Bearer '+window._sb_key,'Content-Type':'application/json'},
+        body:JSON.stringify({watching:newVal})
+      });
+      if(!resp.ok) throw new Error('Watch update failed');
+    }
+    d.watching=newVal;
+    applyFilters();
+    toast(newVal?'⭐ Added to watchlist':'Removed from watchlist',newVal?'success':'info');
+  } catch(e){ toast('Failed: '+e.message,'error'); }
+}
   d.watching=newVal;
   applyFilters();
   toast(newVal?'⭐ Added to watchlist':'Removed from watchlist',newVal?'success':'info');
