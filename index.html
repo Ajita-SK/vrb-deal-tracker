@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VRB Capital — Deal Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -1106,9 +1105,7 @@ document.getElementById('nav-date').textContent=new Date().toLocaleDateString('e
 
 
 
-window.addEventListener('DOMContentLoaded',function(){
-  initSupabase('https://fcbipuwbsdihnxkhzjva.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs');
-});
 </script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onload="initSupabase('https://fcbipuwbsdihnxkhzjva.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs')" onerror="document.getElementById('loading-text').textContent='Failed to load. Please refresh.';"></script>
 </body>
 </html>
