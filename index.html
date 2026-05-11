@@ -4,11 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VRB Capital — Deal Tracker</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#F0F4FA;color:#1a1a2e;min-height:100vh}
+
+/* ── CONFIG BANNER ── */
+.config-banner{background:#7a4700;color:#fff;padding:10px 32px;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.config-banner.hidden{display:none}
+.config-banner strong{font-size:13px}
+.config-banner a{color:#FFC;text-decoration:underline;cursor:pointer}
+.config-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.config-form input{border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:5px 10px;font-size:12px;background:rgba(255,255,255,.15);color:#fff;width:280px;outline:none}
+.config-form input::placeholder{color:rgba(255,255,255,.6)}
+.config-form input:focus{border-color:#fff}
+.btn-config-save{background:#fff;color:#7a4700;border:none;border-radius:5px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer}
 
 /* ── TOAST ── */
 .toast{position:fixed;bottom:24px;right:24px;z-index:999;background:#1F3864;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none;max-width:320px}
@@ -48,6 +59,10 @@ body{font-family:Arial,sans-serif;background:#F0F4FA;color:#1a1a2e;min-height:10
 .kpi-value{font-size:22px;font-weight:700;color:#1F3864}
 .kpi-sub{font-size:11px;color:#888;margin-top:2px}
 .kpi.won .kpi-value{color:#1a6b3a}
+.btn-watch{background:transparent;border:none;cursor:pointer;font-size:17px;padding:0 2px;line-height:1;transition:transform .15s;vertical-align:middle}
+.btn-watch:hover{transform:scale(1.25)}
+tbody tr.watching td{background:#FFFBEB !important}
+tbody tr.watching:hover td{background:#FFF3C4 !important}
 .kpi.loss .kpi-value{color:#c0392b}
 .kpi.pending-k .kpi-value{color:#b8660a}
 .content{padding:0 32px 40px}
@@ -192,6 +207,20 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
+
+<!-- CONFIG BANNER — shown until keys are set -->
+<div class="config-banner" id="config-banner">
+  <div>
+    <strong>⚙ Supabase not configured</strong> — paste your Project URL and anon key below to connect.
+    <a onclick="document.getElementById('config-form-wrap').style.display=document.getElementById('config-form-wrap').style.display==='none'?'flex':'none'"> Toggle</a>
+  </div>
+  <div id="config-form-wrap" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="cfg-url" placeholder="https://xxxx.supabase.co" autocomplete="off">
+    <input id="cfg-key" placeholder="anon public key" autocomplete="off">
+    <button class="btn-config-save" onclick="saveConfig()">Connect</button>
+  </div>
+</div>
+
 <div class="nav">
   <div class="nav-logo">VRB Capital <span>Deal Tracker</span></div>
   <div class="nav-right">
@@ -253,6 +282,7 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
         <option value="">All</option><option value="Yes">Won</option><option value="No">Lost</option><option value="Pending">Pending</option>
       </select>
       <button class="btn-clear" onclick="clearFilters()">Clear filters</button>
+      <button class="btn-clear" id="btn-watchlist" onclick="toggleWatchFilter()" style="border-color:#f6c90e;color:#7a4700">⭐ Watchlist</button>
       <span class="result-count" id="result-count"></span>
     </div>
     <div class="table-wrap">
@@ -279,7 +309,6 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
             <th>Bid Won?</th>
             <th>Notes</th>
             <th>Drive Folder</th>
-            <th>Bigin CRM</th>
             <th>Actions</th>
           </tr></thead>
           <tbody id="deal-tbody"></tbody>
@@ -334,41 +363,20 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
     </div>
     <div class="modal-body">
       <div class="form-grid">
-        <div class="form-group">
-          <label>Deal Source</label>
-          <select id="f-source-type" onchange="toggleSourceInput()">
-            <option value="broker">Via Broker</option>
-            <option value="direct">Direct</option>
-          </select>
-        </div>
-        <div class="form-group" id="f-source-name-wrap">
-          <label>Broker Name</label>
-          <input type="text" id="f-source" placeholder="e.g. ABC Brokerage, John Smith">
+        <div class="form-group full">
+          <label>Deal Source / Broker</label>
+          <input type="text" id="f-source" placeholder="e.g. Broker name, referral source, direct">
         </div>
         <div class="form-group full">
           <label>Lender (Bank / Private Lender)</label>
           <input type="text" id="f-lender" placeholder="e.g. JPMorgan Chase, ABC Capital Fund">
         </div>
-        <div class="form-group" id="type-single-wrap">
+        <div class="form-group">
           <label>Deal Type</label>
           <select id="f-type">
             <option value="">Select type</option>
             <option>Residential</option><option>Multifamily</option><option>Hotel</option>
           </select>
-        </div>
-        <div class="form-group" id="type-multi-wrap" style="display:none">
-          <label>Asset Mix in Portfolio</label>
-          <div style="display:flex;gap:12px;padding:10px 14px;border:1px solid #D9E1F2;border-radius:6px;background:#F7F9FD">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:#1F3864;cursor:pointer">
-              <input type="checkbox" id="f-type-res" value="Residential" style="width:15px;height:15px;accent-color:#1F3864"> 🏠 Residential
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:#1F3864;cursor:pointer">
-              <input type="checkbox" id="f-type-mf" value="Multifamily" style="width:15px;height:15px;accent-color:#1F3864"> 🏢 Multifamily
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:#1F3864;cursor:pointer">
-              <input type="checkbox" id="f-type-hotel" value="Hotel" style="width:15px;height:15px;accent-color:#1F3864"> 🏨 Hotel
-            </label>
-          </div>
         </div>
         <div class="form-group">
           <label>Status</label>
@@ -377,52 +385,11 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
           </select>
         </div>
         <div class="form-group full">
-          <label>Property Type</label>
-          <div style="display:flex;border:1px solid #D9E1F2;border-radius:6px;overflow:hidden">
-            <button type="button" id="toggle-single" onclick="setAddrMode('single')" style="flex:1;padding:9px;font-size:12px;font-weight:700;border:none;background:#1F3864;color:#fff;cursor:pointer">Single Property</button>
-            <button type="button" id="toggle-portfolio" onclick="setAddrMode('portfolio')" style="flex:1;padding:9px;font-size:12px;font-weight:700;border:none;background:#fff;color:#1F3864;cursor:pointer;border-left:1px solid #D9E1F2">Loan Portfolio</button>
-          </div>
-        </div>
-        <div class="form-group full" id="addr-single-wrap">
-          <label>Property Address</label>
-          <input type="text" id="f-addr-single" placeholder="e.g. 1234 Oak Street, Miami, FL 33101">
-        </div>
-        <div class="form-group full" id="addr-portfolio-wrap" style="display:none">
-          <label>Portfolio Description</label>
-          <textarea id="f-addr-portfolio" style="min-height:70px" placeholder="e.g. Pool of NPLs across FL, TX, GA — mix of SFR and MF"></textarea>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-            <div style="display:flex;flex-direction:column;gap:5px">
-              <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">States</label>
-              <input type="text" id="f-states" placeholder="e.g. FL, TX, GA" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:5px">
-              <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">Total Loans in Tape</label>
-              <input type="number" id="f-tape-count" placeholder="e.g. 50" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none">
-            </div>
-          </div>
-          <div style="background:#EBF1FB;border:1px solid #D9E1F2;border-radius:8px;padding:14px;margin-top:12px">
-            <div style="font-size:11px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Loan Tape Summary</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div style="display:flex;flex-direction:column;gap:5px">
-                <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">Total UPB of Tape ($)</label>
-                <input type="number" id="f-tape-upb" placeholder="e.g. 5000000" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;background:#fff" oninput="calcSelectionRatio()">
-              </div>
-              <div style="display:flex;flex-direction:column;gap:5px">
-                <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">Loans We Are Bidding On</label>
-                <input type="number" id="f-sel-count" placeholder="e.g. 12" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;background:#fff" oninput="calcSelectionRatio()">
-              </div>
-              <div style="display:flex;flex-direction:column;gap:5px">
-                <label style="font-size:12px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.4px">UPB of Our Selection ($)</label>
-                <input type="number" id="f-sel-upb" placeholder="e.g. 1200000" style="border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:13px;color:#1F3864;outline:none;background:#fff" oninput="calcSelectionRatio()">
-              </div>
-              <div style="display:flex;flex-direction:column;gap:5px;justify-content:flex-end">
-                <div style="background:#fff;border:1px solid #D9E1F2;border-radius:6px;padding:9px 12px;font-size:12px;color:#6b7c9a" id="tape-ratio-display">Selection ratio will appear here</div>
-              </div>
-            </div>
-          </div>
+          <label>Deal Address / Description</label>
+          <input type="text" id="f-addr" placeholder="e.g. 1234 Oak Street, Miami, FL 33101">
         </div>
         <div class="form-group">
-          <label id="upb-label">UPB ($)</label>
+          <label>UPB ($)</label>
           <input type="number" id="f-upb" placeholder="e.g. 1250000">
         </div>
         <div class="form-group">
@@ -443,13 +410,9 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
           <label>Awarded Amount ($) — if won</label>
           <input type="number" id="f-awarded" placeholder="e.g. 975000">
         </div>
-        <div class="form-group">
+        <div class="form-group full">
           <label>Google Drive Link</label>
-          <input type="text" id="f-fileref" placeholder="https://drive.google.com/drive/folders/...">
-        </div>
-        <div class="form-group">
-          <label>Bigin CRM Link</label>
-          <input type="text" id="f-bigin" placeholder="https://bigin.zoho.com/...">
+          <input type="url" id="f-fileref" placeholder="https://drive.google.com/drive/folders/...">
         </div>
         <div class="form-group full">
           <label>Notes</label>
@@ -489,17 +452,27 @@ const NAVY='#1F3864',BLUE='#2E5FA3',GREEN='#27ae60',AMBER='#f39c12',RED='#e74c3c
 const STORAGE_KEY='vrb_supabase_config';
 let supabase=null;
 let deals=[];
-let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,alertsVisible=true,charts={};
+let activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,alertsVisible=true,charts={},watchFilterOn=false;
 
+function loadConfig(){
+  try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');}catch{return null;}
+}
+function saveConfig(){
+  const url=document.getElementById('cfg-url').value.trim();
+  const key=document.getElementById('cfg-key').value.trim();
+  if(!url||!key){toast('Please enter both URL and key','error');return;}
+  localStorage.setItem(STORAGE_KEY,JSON.stringify({url,key}));
+  initSupabase(url,key);
+}
 function initSupabase(url,key){
   try{
     supabase=window.supabase.createClient(url,key);
+    document.getElementById('config-banner').classList.add('hidden');
     setStatus(true);
     loadDeals();
   }catch(e){
     toast('Connection failed: '+e.message,'error');
     setStatus(false);
-    hideLoading();
   }
 }
 function setStatus(ok){
@@ -533,7 +506,8 @@ function mapRow(r){
     status:r.status||'Active',
     notes:r.notes||'',
     driveLink:r.drive_link||'',
-    biginLink:r.bigin_link||''
+    biginLink:r.bigin_link||'',
+    watching:r.watching||false
   };
 }
 function toRow(d){
@@ -557,7 +531,8 @@ function toRow(d){
     status:d.status,
     notes:d.notes||null,
     drive_link:d.driveLink||null,
-    bigin_link:d.biginLink||null
+    bigin_link:d.biginLink||null,
+    watching:d.watching||false
   };
 }
 async function loadDeals(){
@@ -696,11 +671,11 @@ function downloadICS(id){
    ══════════════════════════════════════════ */
 function exportCSV(){
   const rows=getFiltered();
-  const headers=['Deal Source / Broker','Lender','Deal Type','Address','UPB ($)','Bid Due Date','Days Left','Status','Our Bid ($)','Bid % of UPB','Bid Won?','Awarded Amt ($)','Notes','Google Drive Link','Bigin CRM Link'];
+  const headers=['Deal Source / Broker','Lender','Deal Type','Address','UPB ($)','Bid Due Date','Days Left','Status','Our Bid ($)','Bid % of UPB','Bid Won?','Awarded Amt ($)','Notes','Google Drive Link'];
   const csv=[headers,...rows.map(d=>{
     const dl=daysLeft(d.bidDate);
     const ratio=bidRatio(d.bid,d.upb);
-    return[d.source,d.lender||'',d.type,d.addr,d.upb||'',fmtDate(d.bidDate),dl!==null?dl:'',d.status,d.bid||'',ratio!==null?ratio+'%':'',d.won,d.awarded||'',d.notes||'',d.driveLink||'',d.biginLink||''];
+    return[d.source,d.lender||'',d.type,d.addr,d.upb||'',fmtDate(d.bidDate),dl!==null?dl:'',d.status,d.bid||'',ratio!==null?ratio+'%':'',d.won,d.awarded||'',d.notes||'',d.driveLink||''];
   })].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
@@ -733,14 +708,12 @@ function getFiltered(){
   const won=document.getElementById('filter-won').value;
   const typeMap={res:'Residential',mf:'Multifamily',hotel:'Hotel'};
   return deals.filter(d=>{
-    if(['res','mf','hotel'].includes(activeTab)){
-      const types=(d.type||'').split(', ').map(x=>x.trim());
-      if(!types.includes(typeMap[activeTab]))return false;
-    }
+    if(['res','mf','hotel'].includes(activeTab)&&d.type!==typeMap[activeTab])return false;
     if(src&&d.lender!==src)return false;
     if(broker&&d.source!==broker)return false;
     if(st&&d.status!==st)return false;
     if(won&&d.won!==won)return false;
+    if(watchFilterOn&&!d.watching)return false;
     if(q){const blob=(d.source+d.lender+d.type+d.addr+(d.notes||'')).toLowerCase();if(!blob.includes(q))return false;}
     return true;
   }).sort((a,b)=>{
@@ -774,12 +747,9 @@ function mileBar(dl){
   return`<div class="milestone"><div class="mile-bar"><div class="mile-fill ${cls}" style="width:${pct}%"></div></div></div>`;
 }
 function typeBadge(t){
-  if(!t)return'';
   const m={Residential:'badge-res',Multifamily:'badge-mf',Hotel:'badge-hotel'};
   const ic={Residential:'🏠',Multifamily:'🏢',Hotel:'🏨'};
-  const types=t.split(', ').map(x=>x.trim()).filter(Boolean);
-  if(types.length<=1)return`<span class="badge ${m[t]||'badge-active'}">${ic[t]||''} ${t}</span>`;
-  return types.map(x=>`<span class="badge ${m[x]||'badge-active'}" style="margin-right:2px">${ic[x]||''} ${x}</span>`).join('');
+  return`<span class="badge ${m[t]||''}">${ic[t]||''} ${t}</span>`;
 }
 function wonBadge(w){
   const m={Yes:'badge-yes',No:'badge-no',Pending:'badge-pending'};
@@ -807,7 +777,7 @@ function renderTable(){
   const q=(document.getElementById('search-input').value||'').toLowerCase();
   document.getElementById('result-count').textContent=`${rows.length} deal${rows.length!==1?'s':''} shown`;
   const tbody=document.getElementById('deal-tbody');
-  if(!rows.length){tbody.innerHTML=`<tr><td colspan="15" class="no-results">${supabase?'No deals match your filters.':'Connect to Supabase to load deals.'}</td></tr>`;return;}
+  if(!rows.length){tbody.innerHTML=`<tr><td colspan="14" class="no-results">${supabase?'No deals match your filters.':'Connect to Supabase to load deals.'}</td></tr>`;return;}
   tbody.innerHTML=rows.map(d=>{
     const dl=daysLeft(d.bidDate);
     const hasDate=d.bidDate&&d.won==='Pending'&&d.status==='Active';
@@ -815,27 +785,11 @@ function renderTable(){
       ?`<a href="${d.driveLink}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;color:#2E5FA3;font-size:11px;font-weight:600;text-decoration:none;border:1px solid #D9E1F2;border-radius:5px;padding:3px 8px;background:#F0F6FF">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Open</a>`
       :`<span style="color:#ccc;font-size:11px">—</span>`;
-    const biginCell=d.biginLink
-      ?`<a href="${d.biginLink}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;color:#7c3aed;font-size:11px;font-weight:600;text-decoration:none;border:1px solid #e9d5ff;border-radius:5px;padding:3px 8px;background:#f5f3ff">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Bigin</a>`
-      :`<span style="color:#ccc;font-size:11px">—</span>`;
-    return`<tr>
-      <td>
-        ${d.source==='Direct'
-          ?'<span style="display:inline-block;background:#E6F4EA;color:#1a5c2e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">DIRECT</span>'
-          :`<div class="source-name">${hl(d.source,q)}</div>`}
-      </td>
+    return`<tr class="${d.watching?'watching':''}">
+      <td><div class="source-name">${hl(d.source,q)}</div></td>
       <td><div style="font-size:12px;color:#2d3748">${hl(d.lender||'',q)}</div></td>
       <td>${typeBadge(d.type)}</td>
-      <td>
-        ${d.isPortfolio?`<span style="display:inline-block;background:#EBF1FB;color:#1F3864;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-bottom:4px">PORTFOLIO</span><br>`:''}
-        <div style="color:#2d3748;font-size:12.5px">${hl(d.addr,q)}</div>
-        ${d.isPortfolio&&d.states?`<div style="font-size:11px;color:#6b7c9a;margin-top:2px">${d.states}</div>`:''}
-        ${d.isPortfolio&&(d.tapeCount||d.selCount)?`<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">
-          ${d.tapeCount?`<span style="background:#F0F4FA;border:1px solid #D9E1F2;border-radius:8px;padding:2px 7px;font-size:10px;color:#4a5568">Tape: ${d.tapeCount} loans${d.tapeUpb?' · $'+(d.tapeUpb/1e6).toFixed(2)+'M':''}</span>`:''}
-          ${d.selCount?`<span style="background:#C6EFCE;border-radius:8px;padding:2px 7px;font-size:10px;font-weight:700;color:#1a6b3a">Bidding: ${d.selCount} loans${d.selUpb?' · $'+(d.selUpb/1e6).toFixed(2)+'M':''}</span>`:''}
-        </div>`:''} 
-      </td>
+      <td><div style="color:#2d3748">${hl(d.addr,q)}</div></td>
       <td class="upb">${fmt$(d.upb)}</td>
       <td>${ratioBadge(d.bid,d.upb)}</td>
       <td>${fmtDate(d.bidDate)}</td>
@@ -845,7 +799,7 @@ function renderTable(){
       <td>${wonBadge(d.won)}</td>
       <td style="max-width:180px;font-size:11px;color:#6b7c9a">${hl(d.notes||'',q)}</td>
       <td>${driveCell}</td>
-      <td>${biginCell}</td>
+      <td style="text-align:center;vertical-align:middle"><button class="btn-watch" onclick="toggleWatch(${d.id})" title="${d.watching?'Remove from watchlist':'Add to watchlist'}">${d.watching?'⭐':'☆'}</button></td>
       <td><div class="action-btns">
         <button class="btn-edit" onclick="openEditModal(${d.id})">Edit</button>
         <button class="btn-del" onclick="openDeleteModal(${d.id})">Del</button>
@@ -869,9 +823,9 @@ function updateKPIs(){
   document.getElementById('kpi-lost').textContent=lost;
   document.getElementById('kpi-pending').textContent=pend;
   document.getElementById('tc-all').textContent=deals.length;
-  document.getElementById('tc-res').textContent=deals.filter(d=>(d.type||'').includes('Residential')).length;
-  document.getElementById('tc-mf').textContent=deals.filter(d=>(d.type||'').includes('Multifamily')).length;
-  document.getElementById('tc-hotel').textContent=deals.filter(d=>(d.type||'').includes('Hotel')).length;
+  document.getElementById('tc-res').textContent=deals.filter(d=>d.type==='Residential').length;
+  document.getElementById('tc-mf').textContent=deals.filter(d=>d.type==='Multifamily').length;
+  document.getElementById('tc-hotel').textContent=deals.filter(d=>d.type==='Hotel').length;
 }
 function populateLenderFilter(){
   const sel=document.getElementById('filter-source');
@@ -882,6 +836,25 @@ function populateLenderFilter(){
   const bcur=bsel.value;
   const brokers=[...new Set(deals.map(d=>d.source).filter(Boolean))].sort();
   bsel.innerHTML='<option value="">All Brokers</option>'+brokers.map(s=>`<option${s===bcur?' selected':''}>${s}</option>`).join('');
+}
+function toggleWatchFilter(){
+  watchFilterOn=!watchFilterOn;
+  const btn=document.getElementById('btn-watchlist');
+  btn.style.background=watchFilterOn?'#FFF3CD':'';
+  btn.style.fontWeight=watchFilterOn?'700':'';
+  applyFilters();
+}
+async function toggleWatch(id){
+  const d=deals.find(x=>x.id===id);
+  if(!d||!supabase)return;
+  const newVal=!d.watching;
+  try{
+    const{error}=await supabase.from('deals').update({watching:newVal}).eq('id',id);
+    if(error)throw error;
+    d.watching=newVal;
+    applyFilters();
+    toast(newVal?'⭐ Added to watchlist':'Removed from watchlist',newVal?'success':'info');
+  }catch(e){toast('Failed: '+e.message,'error');}
 }
 function applyFilters(){renderTable();updateKPIs();renderAlerts();}
 
@@ -960,102 +933,26 @@ function renderScorecard(){
     </tr>`).join('');
 }
 
-/* ── SOURCE & ADDRESS TOGGLE ── */
-function toggleSourceInput(){
-  const isDirect=document.getElementById('f-source-type').value==='direct';
-  const wrap=document.getElementById('f-source-name-wrap');
-  wrap.style.display=isDirect?'none':'flex';
-  if(isDirect)document.getElementById('f-source').value='Direct';
-}
-function setAddrMode(mode){
-  const isSingle=mode==='single';
-  document.getElementById('addr-single-wrap').style.display=isSingle?'block':'none';
-  document.getElementById('addr-portfolio-wrap').style.display=isSingle?'none':'block';
-  document.getElementById('toggle-single').style.background=isSingle?'#1F3864':'#fff';
-  document.getElementById('toggle-single').style.color=isSingle?'#fff':'#1F3864';
-  document.getElementById('toggle-portfolio').style.background=isSingle?'#fff':'#1F3864';
-  document.getElementById('toggle-portfolio').style.color=isSingle?'#1F3864':'#fff';
-  document.getElementById('type-single-wrap').style.display=isSingle?'flex':'none';
-  document.getElementById('type-multi-wrap').style.display=isSingle?'none':'flex';
-  document.getElementById('upb-label').textContent=isSingle?'UPB ($)':'UPB of Our Selection ($) — override if different above';
-  if(!isSingle){
-    document.getElementById('f-type-res').checked=false;
-    document.getElementById('f-type-mf').checked=false;
-    document.getElementById('f-type-hotel').checked=false;
-  }
-}
-function calcSelectionRatio(){
-  const tapeUPB=parseFloat(document.getElementById('f-tape-upb').value)||0;
-  const selUPB=parseFloat(document.getElementById('f-sel-upb').value)||0;
-  const tapeCount=parseFloat(document.getElementById('f-tape-count').value)||0;
-  const selCount=parseFloat(document.getElementById('f-sel-count').value)||0;
-  const el=document.getElementById('tape-ratio-display');
-  if(!tapeUPB&&!selUPB&&!tapeCount&&!selCount){el.textContent='Selection ratio will appear here';return;}
-  const parts=[];
-  if(tapeCount&&selCount)parts.push(`Bidding on ${selCount} of ${tapeCount} loans`);
-  if(tapeUPB&&selUPB){const pct=(selUPB/tapeUPB*100).toFixed(1);parts.push(`${pct}% of tape UPB`);}
-  el.textContent=parts.join(' · ')||'—';
-  el.style.color='#1F3864';el.style.fontWeight='600';
-  if(selUPB&&!document.getElementById('f-upb').value)document.getElementById('f-upb').value=selUPB;
-}
-
 /* ══════════════════════════════════════════
    MODALS — CRUD
    ══════════════════════════════════════════ */
 function openAddModal(){
   editingId=null;
   document.getElementById('modal-title').textContent='Add New Deal';
-  ['source','lender','type','upb','biddate','bid','won','awarded','status','notes','fileref','bigin'].forEach(f=>{
+  ['source','lender','type','addr','upb','biddate','bid','won','awarded','status','notes','fileref'].forEach(f=>{
     const el=document.getElementById('f-'+f);
     if(el)el.value=f==='won'?'Pending':f==='status'?'Active':'';
   });
-  document.getElementById('f-source-type').value='broker';
-  document.getElementById('f-source-name-wrap').style.display='flex';
-  document.getElementById('f-addr-single').value='';
-  document.getElementById('f-addr-portfolio').value='';
-  document.getElementById('f-states').value='';
-  document.getElementById('f-tape-count').value='';
-  document.getElementById('f-tape-upb').value='';
-  document.getElementById('f-sel-count').value='';
-  document.getElementById('f-sel-upb').value='';
-  const rd=document.getElementById('tape-ratio-display');
-  if(rd){rd.textContent='Selection ratio will appear here';rd.style.color='#6b7c9a';rd.style.fontWeight='400';}
-  document.getElementById('f-type').value='';
-  document.getElementById('f-type-res').checked=false;
-  document.getElementById('f-type-mf').checked=false;
-  document.getElementById('f-type-hotel').checked=false;
-  setAddrMode('single');
-  const sba=document.getElementById('btn-save-deal');if(sba){sba.disabled=false;sba.classList.remove('saving');}
   document.getElementById('deal-modal').classList.add('open');
 }
 function openEditModal(id){
   editingId=id;
   const d=deals.find(x=>x.id===id);if(!d)return;
   document.getElementById('modal-title').textContent='Edit Deal';
-  const isDirect=d.source==='Direct';
-  document.getElementById('f-source-type').value=isDirect?'direct':'broker';
-  document.getElementById('f-source-name-wrap').style.display=isDirect?'none':'flex';
-  document.getElementById('f-source').value=isDirect?'':d.source||'';
+  document.getElementById('f-source').value=d.source||'';
   document.getElementById('f-lender').value=d.lender||'';
   document.getElementById('f-type').value=d.type||'';
-  const isPortfolio=d.isPortfolio||false;
-  setAddrMode(isPortfolio?'portfolio':'single');
-  document.getElementById('f-addr-single').value=isPortfolio?'':d.addr||'';
-  document.getElementById('f-addr-portfolio').value=isPortfolio?d.addr||'':'';
-  document.getElementById('f-states').value=d.states||'';
-  document.getElementById('f-tape-count').value=d.tapeCount||'';
-  document.getElementById('f-tape-upb').value=d.tapeUpb||'';
-  document.getElementById('f-sel-count').value=d.selCount||'';
-  document.getElementById('f-sel-upb').value=d.selUpb||'';
-  if(d.tapeUpb||d.selUpb||d.tapeCount||d.selCount)calcSelectionRatio();
-  if(isPortfolio){
-    const types=(d.type||'').split(', ');
-    document.getElementById('f-type-res').checked=types.includes('Residential');
-    document.getElementById('f-type-mf').checked=types.includes('Multifamily');
-    document.getElementById('f-type-hotel').checked=types.includes('Hotel');
-  } else {
-    document.getElementById('f-type').value=d.type||'';
-  }
+  document.getElementById('f-addr').value=d.addr||'';
   document.getElementById('f-upb').value=d.upb||'';
   document.getElementById('f-biddate').value=d.bidDate||'';
   document.getElementById('f-bid').value=d.bid||'';
@@ -1064,41 +961,17 @@ function openEditModal(id){
   document.getElementById('f-status').value=d.status||'Active';
   document.getElementById('f-notes').value=d.notes||'';
   document.getElementById('f-fileref').value=d.driveLink||'';
-  document.getElementById('f-bigin').value=d.biginLink||'';
-  const sb=document.getElementById('btn-save-deal');if(sb){sb.disabled=false;sb.classList.remove('saving');}
   document.getElementById('deal-modal').classList.add('open');
 }
 function closeModal(){document.getElementById('deal-modal').classList.remove('open');}
 
 async function saveDeal(){
   if(!supabase){toast('Not connected to Supabase','error');return;}
-  const btn=document.getElementById('btn-save-deal');
-  btn.disabled=false;btn.classList.remove('saving');
-  const isPortfolio=document.getElementById('addr-portfolio-wrap').style.display!=='none';
-  let dealType='';
-  if(isPortfolio){
-    const types=[];
-    if(document.getElementById('f-type-res').checked)types.push('Residential');
-    if(document.getElementById('f-type-mf').checked)types.push('Multifamily');
-    if(document.getElementById('f-type-hotel').checked)types.push('Hotel');
-    dealType=types.join(', ')||'Mixed';
-  }else{
-    dealType=document.getElementById('f-type').value||'';
-  }
   const d={
-    source:document.getElementById('f-source-type').value==='direct'?'Direct':document.getElementById('f-source').value.trim(),
+    source:document.getElementById('f-source').value.trim(),
     lender:document.getElementById('f-lender').value.trim(),
-    isPortfolio:isPortfolio,
-    type:dealType,
-    addr:isPortfolio
-      ?document.getElementById('f-addr-portfolio').value.trim()
-      :document.getElementById('f-addr-single').value.trim(),
-    loanCount:null,
-    states:document.getElementById('f-states').value.trim(),
-    tapeCount:parseFloat(document.getElementById('f-tape-count').value)||null,
-    tapeUpb:parseFloat(document.getElementById('f-tape-upb').value)||null,
-    selCount:parseFloat(document.getElementById('f-sel-count').value)||null,
-    selUpb:parseFloat(document.getElementById('f-sel-upb').value)||null,
+    type:document.getElementById('f-type').value,
+    addr:document.getElementById('f-addr').value.trim(),
     upb:parseFloat(document.getElementById('f-upb').value)||null,
     bidDate:document.getElementById('f-biddate').value,
     bid:parseFloat(document.getElementById('f-bid').value)||null,
@@ -1106,11 +979,10 @@ async function saveDeal(){
     awarded:parseFloat(document.getElementById('f-awarded').value)||null,
     status:document.getElementById('f-status').value,
     notes:document.getElementById('f-notes').value.trim(),
-    driveLink:document.getElementById('f-fileref').value.trim(),
-    biginLink:document.getElementById('f-bigin').value.trim()
+    driveLink:document.getElementById('f-fileref').value.trim()
   };
-  if(!d.source){toast('Deal Source / Broker is required.','error');return;}
-  if(!d.type)d.type='';
+  if(!d.source||!d.type){toast('Deal Source and Deal Type are required.','error');return;}
+  const btn=document.getElementById('btn-save-deal');
   btn.classList.add('saving');btn.disabled=true;
   try{
     if(editingId){
@@ -1125,8 +997,6 @@ async function saveDeal(){
     }
     closeModal();populateLenderFilter();applyFilters();
   }catch(e){
-    console.error('Save error:',e);
-    alert('Save failed: '+e.message);
     toast('Save failed: '+e.message,'error');
   }finally{
     btn.classList.remove('saving');btn.disabled=false;
@@ -1157,18 +1027,15 @@ document.getElementById('confirm-modal').addEventListener('click',e=>{if(e.targe
    ══════════════════════════════════════════ */
 document.getElementById('nav-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
-
-const VRB_URL='https://fcbipuwbsdihnxkhzjva.supabase.co';
-const VRB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs';
-
-window.addEventListener('load',function(){
-  if(window.supabase&&typeof window.supabase.createClient==='function'){
-    initSupabase(VRB_URL,VRB_KEY);
-  }else{
-    hideLoading();
-    alert('Supabase library failed to load. Please check your internet connection and refresh.');
-  }
-});
+const cfg=loadConfig();
+if(cfg&&cfg.url&&cfg.key){
+  document.getElementById('cfg-url').value=cfg.url;
+  document.getElementById('cfg-key').value=cfg.key;
+  initSupabase(cfg.url,cfg.key);
+}else{
+  hideLoading();
+  applyFilters();
+}
 </script>
 </body>
 </html>
