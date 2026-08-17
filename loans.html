@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loans — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+const RESOLVED = new Set(["paid_off","reinstated","note_sold","reo_sold","dil_completed","charged_off"]);
+let ALL = [], sortKey = "upb", sortDir = -1;
+
+const COLS = [
+  {k:"vrb_loan_number", l:"Loan",     get:r=>r.vrb_loan_number, cell:r=>`<span class="mono">${esc(r.vrb_loan_number)}</span>`},
+  {k:"borrower_name",   l:"Borrower", get:r=>r.borrower_name,   cell:r=>esc(r.borrower_name)},
+  {k:"market",          l:"Market",   get:r=>(r.property_state||"")+(r.property_city||""),
+    cell:r=>`<span class="dim">${esc(r.property_city||"")}, ${esc(r.property_state||"")}</span>`},
+  {k:"asset_class",     l:"Type",     get:r=>r.asset_class,
+    cell:r=>{const a=ASSET_META[r.asset_class]||{l:r.asset_class,e:""};
+      return `<span class="pill gray">${a.e} ${esc(a.l)}</span>`;}},
+  {k:"lien",            l:"Lien",     get:r=>r.lien_position, num:true,
+    cell:r=>r.lien_position==="first"?"1st":r.lien_position==="second"?"2nd":"—"},
+  {k:"current_status",  l:"Status",   get:r=>r.current_status, cell:r=>statusPill(r.current_status)},
+  {k:"upb",             l:"UPB",      get:r=>N(r.upb)??-1, num:true, cell:r=>fmtUSD(r.upb)},
+  {k:"all_in_basis",    l:"All-in basis", get:r=>N(r.all_in_basis)??-1, num:true, cell:r=>fmtUSD(r.all_in_basis)},
+  {k:"total_spend",     l:"Expenses", get:r=>N(r.total_spend)??-1, num:true,
+    cell:r=>N(r.total_spend)?fmtUSD(r.total_spend):'<span class="dim">—</span>'},
+  {k:"ltv",             l:"LTV",      get:r=>N(r.ltv)??-1, num:true, cell:r=>fmtPct(r.ltv,0)},
+  {k:"note_rate",       l:"Rate",     get:r=>N(r.note_rate)??-1, num:true, cell:r=>fmtPct(r.note_rate,2)},
+  {k:"days_in_status",  l:"In stage", get:r=>r.days_in_status??-1, num:true,
+    cell:r=>r.days_in_status!=null?r.days_in_status+"d":'<span class="dim">—</span>'},
+  {k:"servicer_name",   l:"Servicer", get:r=>r.servicer_name||"", cell:r=>`<span class="dim">${esc(r.servicer_name||"—")}</span>`},
+  {k:"data_as_of",      l:"Data as of", get:r=>r.data_as_of||"",
+    cell:r=>`<span class="dim">${r.data_as_of?fmtDate(r.data_as_of):"closed"}</span>`},
+];
+
+function filtered() {
+  const term = document.getElementById("f-q").value.toLowerCase();
+  const cls = document.getElementById("f-class").value;
+  const asset = document.getElementById("f-asset").value;
+  const svc = document.getElementById("f-svc").value;
+  let out = ALL.filter(r => {
+    const resolved = RESOLVED.has(r.current_status);
+    if (cls === "live" && resolved) return false;
+    if (cls === "resolved" && !resolved) return false;
+    if (cls !== "live" && cls !== "all" && cls !== "resolved" && r.current_class !== cls) return false;
+    if (asset !== "all" && r.asset_class !== asset) return false;
+    if (svc !== "all" && r.servicer_name !== svc) return false;
+    if (term) {
+      const hay = [r.vrb_loan_number, r.borrower_name, r.property_address,
+                   r.property_city, r.property_state].join(" ").toLowerCase();
+      if (!hay.includes(term)) return false;
+    }
+    return true;
+  });
+  const col = COLS.find(c => c.k === sortKey) || COLS[6];
+  out.sort((a,b) => {
+    const av = col.get(a), bv = col.get(b);
+    return (typeof av === "number" ? av-bv : String(av).localeCompare(String(bv))) * sortDir;
+  });
+  return out;
+}
+
+function draw() {
+  const rows = filtered();
+  const upb = rows.reduce((t,r)=>t+(N(r.upb)||0),0);
+  const basis = rows.reduce((t,r)=>t+(N(r.all_in_basis)||0),0);
+  document.getElementById("cnt").textContent =
+    `${rows.length} shown · ${fmtCompact(upb)} UPB · ${fmtCompact(basis)} basis`;
+  document.getElementById("tb").innerHTML = rows.length ? rows.map(r =>
+    `<tr class="click" onclick="location.href='loan.html?id=${r.id}'">
+      ${COLS.map(c => `<td class="${c.num?"num":""}">${c.cell(r)}</td>`).join("")}
+    </tr>`).join("")
+    : `<tr><td colspan="${COLS.length}"><div class="empty">Nothing matches these filters.</div></td></tr>`;
+  document.querySelectorAll("th[data-k]").forEach(th => {
+    th.textContent = COLS.find(c=>c.k===th.dataset.k).l +
+      (th.dataset.k === sortKey ? (sortDir === -1 ? "  ↓" : "  ↑") : "");
+  });
+}
+
+vrbBoot("am","Loans", async (main) => {
+  ALL = await q("v_loan_current");
+  const assets = [...new Set(ALL.map(r=>r.asset_class))].filter(Boolean);
+  const svcs = [...new Set(ALL.map(r=>r.servicer_name))].filter(Boolean);
+
+  main.innerHTML = `
+  <h1 class="vrb-h1">Loans</h1>
+  <p class="vrb-sub" id="cnt"></p>
+
+  <div class="vrb-filters">
+    <label for="f-q">Search:</label>
+    <input type="text" id="f-q" placeholder="Loan number, borrower, address...">
+    <label for="f-class">Show:</label>
+    <select id="f-class">
+      <option value="live">Live only</option>
+      <option value="all">All incl. exited</option>
+      <option value="performing">Performing</option>
+      <option value="non_performing">Non-performing</option>
+      <option value="reo">REO</option>
+      <option value="resolved">Exited</option>
+    </select>
+    <label for="f-asset">Type:</label>
+    <select id="f-asset"><option value="all">All types</option>
+      ${assets.map(a=>`<option value="${a}">${(ASSET_META[a]||{l:a}).l}</option>`).join("")}</select>
+    <label for="f-svc">Servicer:</label>
+    <select id="f-svc"><option value="all">All servicers</option>
+      ${svcs.map(s=>`<option>${esc(s)}</option>`).join("")}</select>
+    <button class="btn ghost" id="clr">Clear filters</button>
+  </div>
+
+  <div class="vrb-card"><div class="scrollx"><table class="vrb-t">
+    <thead><tr>${COLS.map(c =>
+      `<th class="sortable ${c.num?"num":""}" data-k="${c.k}">${c.l}</th>`).join("")}</tr></thead>
+    <tbody id="tb"></tbody></table></div></div>`;
+
+  ["f-q","f-class","f-asset","f-svc"].forEach(id =>
+    document.getElementById(id).addEventListener("input", draw));
+  document.getElementById("clr").onclick = () => {
+    document.getElementById("f-q").value = "";
+    ["f-class","f-asset","f-svc"].forEach((id,i) =>
+      document.getElementById(id).value = i===0 ? "live" : "all");
+    draw();
+  };
+  document.querySelectorAll("th[data-k]").forEach(th => {
+    th.onclick = () => {
+      if (sortKey === th.dataset.k) sortDir = -sortDir;
+      else { sortKey = th.dataset.k; sortDir = -1; }
+      draw();
+    };
+  });
+  draw();
+});
+</script>
+</body>
+</html>

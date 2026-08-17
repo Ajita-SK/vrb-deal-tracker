@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Portfolio — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+const STAGE_ORDER = ["current","forbearance","modification","payment_plan","dq_30","dq_60",
+ "dq_90_plus","bankruptcy","demand_sent","pre_fc_referred","fc_filed","sale_scheduled",
+ "sale_held","redemption_period","reo_held","reo_listed","reo_under_contract",
+ "paid_off","reinstated","note_sold","reo_sold","dil_completed","charged_off"];
+const RESOLVED = new Set(["paid_off","reinstated","note_sold","reo_sold","dil_completed","charged_off"]);
+const TOLERANCE = {sale_scheduled:45,reo_under_contract:45,pre_fc_referred:60,
+  demand_sent:60,fc_filed:120,reo_listed:120};
+
+vrbBoot("am","Portfolio", async (main) => {
+  const rows = (await q("v_loan_current")).map(r => ({
+    ...r,
+    upb:N(r.upb), purchase_price:N(r.purchase_price), all_in_basis:N(r.all_in_basis),
+    latest_value:N(r.latest_value), note_rate:N(r.note_rate), ltv:N(r.ltv),
+    total_spend:N(r.total_spend), recoverable_advances:N(r.recoverable_advances),
+    undetermined_spend:N(r.undetermined_spend), unpaid_expenses:N(r.unpaid_expenses),
+  }));
+
+  if (!rows.length) {
+    main.innerHTML = `<h1 class="vrb-h1">Portfolio</h1>
+      <div class="empty" style="background:#fff;border:1px solid var(--line);border-radius:10px">
+        No loans yet. Load the intake template to get started.</div>`;
+    return;
+  }
+
+  const live = rows.filter(r => !RESOLVED.has(r.current_status));
+  const exited = rows.filter(r => RESOLVED.has(r.current_status));
+  const sum = (a, f) => a.reduce((t, x) => t + (f(x) || 0), 0);
+  const upb = sum(live, r => r.upb);
+  const basis = sum(live, r => r.all_in_basis);
+  const spend = sum(rows, r => r.total_spend);
+
+  const byClass = ["performing","non_performing","reo"].map(c => {
+    const s = live.filter(r => r.current_class === c);
+    return {c, n:s.length, upb:sum(s, r => r.upb)};
+  });
+
+  /* exceptions */
+  const ex = [];
+  live.forEach(r => {
+    const tol = TOLERANCE[r.current_status] ?? 90;
+    if (r.current_class !== "performing" && r.days_in_status > tol)
+      ex.push({id:r.vrb_loan_number, k:"Stuck in stage",
+        d:`${(STATUS_META[r.current_status]||{}).l} · ${r.days_in_status}d (tolerance ${tol}d)`,
+        w:r.upb, hi:r.days_in_status > tol*1.8});
+    if (r.days_since_last_report > 45)
+      ex.push({id:r.vrb_loan_number, k:"Servicer data stale",
+        d:`Last reported ${fmtDate(r.data_as_of)} · ${r.days_since_last_report}d ago`, w:r.upb});
+    if (r.latest_value && r.upb / r.latest_value > 1)
+      ex.push({id:r.vrb_loan_number, k:"Underwater to value",
+        d:`LTV ${fmtPct(r.ltv,0)} · value ${fmtCompact(r.latest_value)}`, w:r.upb, hi:true});
+    if (r.undetermined_spend > 0)
+      ex.push({id:r.vrb_loan_number, k:"Recoverability undecided",
+        d:`${fmtUSD(r.undetermined_spend)} unclassified`, w:r.upb});
+    if (r.legal_maturity_date) {
+      const m = (new Date(r.legal_maturity_date) - new Date()) / 2629800000;
+      if (m < 6) ex.push({id:r.vrb_loan_number, k:"Maturity inside 6mo",
+        d:`Matures ${fmtDate(r.legal_maturity_date)}`, w:r.upb, hi:m < 2});
+    }
+  });
+  ex.sort((a,b) => (b.hi?1:0)-(a.hi?1:0) || (b.w||0)-(a.w||0));
+
+  /* book rail grouped by stage */
+  const groups = [];
+  STAGE_ORDER.forEach(s => {
+    const items = rows.filter(r => r.current_status === s)
+                      .sort((a,b) => (b.upb||0)-(a.upb||0));
+    if (items.length) groups.push({s, items, w:sum(items, r => r.upb),
+      exit:RESOLVED.has(s), cls:(items[0].current_class)});
+  });
+  const railTotal = groups.reduce((t,g) => t + g.w, 0) || 1;
+  const rail = groups.map(g => {
+    const flat = g.w === 0;
+    const blocks = g.items.map(r => {
+      const hex = (CLASS_META[r.current_class]||{}).hex || "#8A97A8";
+      const st = flat ? "flex:0 0 8px" : `flex:${r.upb} 1 0`;
+      return `<a href="loan.html?id=${r.id}" title="${esc(r.vrb_loan_number)} — ${esc(r.borrower_name)} — ${fmtUSD(r.upb)}"
+        style="${st};background:${hex};height:56px;border-radius:2px;display:block;
+        ${g.exit?"opacity:.55":""}"></a>`;
+    }).join("");
+    const gs = flat ? `flex:0 0 ${Math.max(20, g.items.length*10)}px`
+                    : `flex:${g.w} 1 0`;
+    return `<div style="${gs};min-width:18px">
+      <div style="display:flex;gap:2px">${blocks}</div>
+      <div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--line);
+        font-size:11px;color:var(--ink-2);display:flex;gap:5px;overflow:hidden">
+        <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc((STATUS_META[g.s]||{}).l||g.s)}</span>
+        <span class="dim" style="margin-left:auto">${g.items.length}</span>
+      </div></div>`;
+  }).join("");
+
+  /* weighted averages, live only */
+  const wUpb = sum(live, r => r.upb) || 1;
+  const wac = sum(live, r => (r.upb||0)*(r.note_rate||0)) / wUpb;
+  const yob = sum(live, r => (r.upb||0)*(r.note_rate||0)) / (sum(live, r => r.purchase_price)||1);
+  const wamRows = live.filter(r => r.legal_maturity_date);
+  const wam = wamRows.length
+    ? sum(wamRows, r => (r.upb||0)*Math.max(0,(new Date(r.legal_maturity_date)-new Date())/2629800000))
+      / (sum(wamRows, r => r.upb)||1) : null;
+  const ltvRows = live.filter(r => r.ltv != null);
+  const wLtv = ltvRows.length
+    ? sum(ltvRows, r => (r.upb||0)*r.ltv) / (sum(ltvRows, r => r.upb)||1) : null;
+
+  const conc = [...live].sort((a,b)=>(b.upb||0)-(a.upb||0)).slice(0,6);
+  let cum = 0;
+  const top3 = conc.slice(0,3).reduce((t,r)=>t+(r.upb||0),0) / (upb||1);
+
+  main.innerHTML = `
+  <h1 class="vrb-h1">Portfolio Overview</h1>
+  <p class="vrb-sub">${live.length} live positions · ${exited.length} exited · ${new Set(live.map(r=>r.servicer_name)).size} servicers</p>
+
+  <div class="vrb-kpis">
+    <div class="vrb-kpi"><div class="k">Total UPB</div><div class="v">${fmtCompact(upb)}</div><div class="s">live positions</div></div>
+    <div class="vrb-kpi"><div class="k">All-in basis</div><div class="v">${fmtCompact(basis)}</div><div class="s">purchase + costs + expenses</div></div>
+    ${byClass.map(b => `<div class="vrb-kpi"><div class="k">${CLASS_META[b.c].l}</div>
+      <div class="v">${b.n}</div><div class="s">${fmtCompact(b.upb)} · ${fmtPct(b.upb/(upb||1),0)} of UPB</div></div>`).join("")}
+    <div class="vrb-kpi ${ex.length?"warn":""}"><div class="k">Needs attention</div>
+      <div class="v">${ex.length}</div><div class="s">open items</div></div>
+  </div>
+
+  <div class="vrb-card">
+    <div class="vrb-card-h"><h2>The book</h2>
+      <span class="meta">every position by stage · width = UPB · click to open</span></div>
+    <div class="vrb-card-b scrollx"><div style="display:flex;gap:10px;min-width:640px">${rail}</div></div>
+  </div>
+
+  <div style="display:grid;gap:20px;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)">
+    <div>
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Needs attention</h2><span class="meta">${ex.length} open</span></div>
+        ${ex.length ? `<div class="scrollx"><table class="vrb-t"><tbody>
+          ${ex.slice(0,25).map(r => `<tr class="click" onclick="location.href='loans.html'">
+            <td style="width:4px;padding:0;background:${r.hi?"var(--red)":"var(--ink-3)"}"></td>
+            <td class="mono" style="width:110px">${esc(r.id)}</td>
+            <td style="font-weight:600;width:190px">${esc(r.k)}</td>
+            <td class="dim">${esc(r.d)}</td></tr>`).join("")}
+        </tbody></table></div>` : `<div class="empty">Nothing flagged.</div>`}
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Concentration</h2>
+          <span class="meta">top 3 = ${fmtPct(top3,0)} of UPB</span></div>
+        <div class="scrollx"><table class="vrb-t">
+          <thead><tr><th>Loan</th><th>Borrower</th><th>Market</th>
+            <th class="num">UPB</th><th class="num">Share</th><th class="num">Cumulative</th></tr></thead>
+          <tbody>${conc.map(r => { cum += r.upb||0; return `
+            <tr class="click" onclick="location.href='loan.html?id=${r.id}'">
+              <td class="mono">${esc(r.vrb_loan_number)}</td>
+              <td>${esc(r.borrower_name)}</td>
+              <td class="dim">${esc(r.property_city||"")}, ${esc(r.property_state||"")}</td>
+              <td class="num">${fmtUSD(r.upb)}</td>
+              <td class="num">${fmtPct((r.upb||0)/(upb||1),1)}</td>
+              <td class="num dim">${fmtPct(cum/(upb||1),0)}</td></tr>`;}).join("")}
+          </tbody></table></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Weighted averages</h2><span class="meta">live only</span></div>
+        <table class="vrb-t"><tbody>
+          <tr><td>WAC (contractual)</td><td class="num">${fmtPct(wac,2)}</td></tr>
+          <tr><td>Running yield on basis</td><td class="num">${fmtPct(yob,2)}</td></tr>
+          <tr><td>WAM to legal maturity</td><td class="num">${wam?Math.round(wam)+" mo":"—"}</td></tr>
+          <tr><td>Weighted avg LTV</td><td class="num">${fmtPct(wLtv,0)}</td></tr>
+          <tr><td>Total expenses</td><td class="num">${fmtUSD(spend)}</td></tr>
+          <tr><td>Recoverable advances</td><td class="num">${fmtUSD(sum(rows,r=>r.recoverable_advances))}</td></tr>
+        </tbody></table>
+        <div class="vrb-card-b" style="padding-top:0">
+          <p class="note">One large position moves every average at this portfolio size —
+          read these alongside the concentration table, not on their own.</p></div>
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Status mix</h2></div>
+        <div class="vrb-card-b">
+          <div style="display:flex;height:9px;border-radius:3px;overflow:hidden;margin-bottom:14px">
+            ${byClass.map(b => `<div style="width:${((b.upb||0)/(upb||1))*100}%;
+              background:${CLASS_META[b.c].hex}"></div>`).join("")}
+          </div>
+          <table class="vrb-t" style="font-size:13px"><tbody>
+            ${byClass.map(b => `<tr><td>
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                background:${CLASS_META[b.c].hex};margin-right:8px"></span>${CLASS_META[b.c].l}</td>
+              <td class="num">${b.n}</td><td class="num">${fmtCompact(b.upb)}</td></tr>`).join("")}
+          </tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>`;
+});
+</script>
+</body>
+</html>

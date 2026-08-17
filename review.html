@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review queue — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+let QUEUE = [], LOANS = [], STATE = {};
+
+const DUP_LABEL = {
+  identical:"Identical — same vendor, invoice number, date and amount",
+  same_invoice_number:"Same vendor and invoice number",
+  same_date_and_amount:"Same date and amount",
+  same_amount_near_date:"Same amount, within 14 days",
+};
+
+async function checkDups(cardId) {
+  const it = QUEUE.find(x => x.id === cardId);
+  const st = STATE[cardId];
+  if (!st.loanId) { st.dups = null; render(); return; }
+  const { data, error } = await sb.rpc("check_expense_duplicates", {
+    p_loan_id: st.loanId,
+    p_amount: N(it.proposed.amount),
+    p_invoice_date: it.proposed.invoice_date || null,
+    p_vendor: it.proposed.vendor || null,
+    p_invoice_number: it.proposed.invoice_number || null,
+    p_exclude_staging_id: it.id,
+  });
+  st.dups = error ? null : (data || []);
+  render();
+}
+
+async function approve(cardId, allowDup) {
+  const it = QUEUE.find(x => x.id === cardId);
+  const st = STATE[cardId];
+  st.busy = true; st.error = null; render();
+
+  const { data, error } = await sb.rpc("approve_expense", {
+    p_staging_id: it.id,
+    p_loan_id: st.loanId,
+    p_category: st.category,
+    p_recovery: st.recovery,
+    p_reviewer: vrbUser.email,
+    p_paid_date: null,
+    p_allow_duplicate: !!allowDup,
+    p_duplicate_reason: allowDup ? (st.dupReason || null) : null,
+  });
+
+  st.busy = false;
+  if (error) {
+    if (error.message.includes("DUPLICATE_SUSPECTED")) {
+      st.confirming = true;
+      st.dupDetail = error.message.replace(/^.*DUPLICATE_SUSPECTED:\s*/, "");
+    } else {
+      st.error = error.message;
+    }
+    render();
+    return;
+  }
+  QUEUE = QUEUE.filter(x => x.id !== cardId);
+  render();
+}
+
+async function reject(cardId) {
+  const st = STATE[cardId];
+  st.busy = true; render();
+  const { error } = await sb.rpc("reject_staged_expense", {
+    p_staging_id: cardId, p_reviewer: vrbUser.email,
+    p_reason: "Rejected from review queue",
+  });
+  st.busy = false;
+  if (error) { st.error = error.message; render(); return; }
+  QUEUE = QUEUE.filter(x => x.id !== cardId);
+  render();
+}
+
+function setField(cardId, field, value) {
+  STATE[cardId][field] = value;
+  if (field === "loanId") checkDups(cardId); else render();
+}
+
+function card(it) {
+  const st = STATE[it.id];
+  const p = it.proposed || {};
+  const conf = N(it.confidence) || 0;
+  const amt = N(p.amount) || 0;
+  const isExpense = it.kind === "expense";
+  const ready = isExpense ? (st.loanId && st.recovery) : true;
+
+  return `
+  <div class="vrb-card">
+    <div class="vrb-card-h">
+      <h2>${isExpense ? "Expense" : "New loan"}</h2>
+      <span class="pill ${conf<0.5?"red":conf<0.8?"amber":"green"}">confidence ${Math.round(conf*100)}%</span>
+      <span class="meta">proposed by ${esc(it.proposed_by)} · ${fmtDate(it.created_at.slice(0,10))}</span>
+    </div>
+    <div class="vrb-card-b">
+      <div class="vrb-kpis" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px">
+        <div class="vrb-kpi"><div class="k">Amount</div><div class="v" style="font-size:20px">${fmtUSD(amt,2)}</div></div>
+        <div class="vrb-kpi"><div class="k">Vendor</div><div class="v" style="font-size:14px">${esc(p.vendor||"—")}</div></div>
+        <div class="vrb-kpi"><div class="k">Invoice</div><div class="v" style="font-size:14px">${esc(p.invoice_number||"—")}</div></div>
+        <div class="vrb-kpi"><div class="k">Date</div><div class="v" style="font-size:14px">${esc(p.invoice_date||"—")}</div></div>
+        <div class="vrb-kpi"><div class="k">Paid</div><div class="v" style="font-size:14px">${p.paid_date?esc(p.paid_date):"unpaid"}</div></div>
+      </div>
+      ${p.description ? `<p style="margin:0 0 14px;color:var(--ink-2)">${esc(p.description)}</p>` : ""}
+
+      ${(it.issues||[]).length ? `<div class="alert">
+        <b>${it.issues.length} thing${it.issues.length===1?"":"s"} to check</b>
+        <ul>${it.issues.map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>` : ""}
+
+      ${isExpense ? `<div class="vrb-filters" style="margin-bottom:14px">
+        <label>Loan${st.loanId?"":" — required"}:</label>
+        <select onchange="setField('${it.id}','loanId',this.value)">
+          <option value="">Choose a loan…</option>
+          ${LOANS.map(l=>`<option value="${l.id}"${st.loanId===l.id?" selected":""}>
+            ${esc(l.vrb_loan_number)} — ${esc(l.borrower_name)}</option>`).join("")}
+        </select>
+        <label>Category:</label>
+        <select onchange="setField('${it.id}','category',this.value)">
+          ${Object.keys(CATEGORY_LABEL).map(c=>`<option value="${c}"${st.category===c?" selected":""}>
+            ${CATEGORY_LABEL[c]}</option>`).join("")}
+        </select>
+        <label>Recoverability — required:</label>
+        <select onchange="setField('${it.id}','recovery',this.value)">
+          <option value="">Decide…</option>
+          ${Object.keys(RECOVERY_LABEL).map(k=>`<option value="${k}"${st.recovery===k?" selected":""}>
+            ${RECOVERY_LABEL[k]}</option>`).join("")}
+        </select>
+      </div>` : ""}
+
+      ${(st.dups && st.dups.length && !st.confirming) ? `<div class="alert">
+        <b>This looks like it is already recorded — ${st.dups.length} possible match${st.dups.length===1?"":"es"}</b>
+        <ul>${st.dups.map(d=>`<li><span class="mono">${esc(d.invoice_number||"no number")} ·
+          ${esc(d.invoice_date||"no date")} · ${fmtUSD(d.amount,2)}</span> — ${DUP_LABEL[d.match]||d.match}
+          ${d.source==="staged"?" · also waiting in this queue":""}
+          ${d.source==="expense"&&d.paid_date?` · paid ${d.paid_date}`:""}</li>`).join("")}</ul>
+        You can still enter it — press Approve and you will be asked to confirm.</div>` : ""}
+
+      ${st.confirming ? `<div class="alert bad">
+        <b>Enter this a second time?</b>
+        ${st.dupDetail?`<p class="mono" style="font-size:12px">${esc(st.dupDetail)}</p>`:""}
+        <p>Approving now creates a second charge on this loan and raises all-in basis by
+        ${fmtUSD(amt,2)}. The new row will be tagged as a deliberate duplicate and linked to
+        the existing one.</p>
+        <input class="vrb-in" style="width:100%;margin:8px 0" placeholder="Why is this a separate charge? (optional)"
+          value="${esc(st.dupReason||"")}" oninput="STATE['${it.id}'].dupReason=this.value">
+        <div style="display:flex;gap:9px">
+          <button class="btn danger" ${st.busy?"disabled":""} onclick="approve('${it.id}',true)">
+            ${st.busy?"Working…":"Yes, enter it anyway"}</button>
+          <button class="btn ghost" onclick="setField('${it.id}','confirming',false)">Cancel</button>
+        </div></div>` : ""}
+
+      ${st.error ? `<div class="alert bad"><b>Could not save</b>${esc(st.error)}</div>` : ""}
+
+      <div style="display:flex;gap:9px;align-items:center">
+        <button class="btn" ${!ready||st.busy||st.confirming?"disabled":""}
+          onclick="approve('${it.id}',false)">${st.busy?"Working…":"Approve"}</button>
+        <button class="btn ghost" ${st.busy?"disabled":""} onclick="reject('${it.id}')">Reject</button>
+        ${!ready?`<span class="dim" style="font-size:12px">Pick a loan and a recoverability first</span>`:""}
+      </div>
+    </div>
+  </div>`;
+}
+
+function render() {
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <h1 class="vrb-h1">Review queue</h1>
+    <p class="vrb-sub">${QUEUE.length} awaiting a decision · nothing here has touched the book</p>
+    ${QUEUE.length ? QUEUE.map(card).join("")
+      : `<div class="vrb-card"><div class="empty">
+        Queue is clear. Extractions from new invoices and datatapes land here before anything is written.
+        </div></div>`}
+    ${QUEUE.length ? `<p class="note">Ordered lowest confidence first, so the items most likely to be
+      wrong get looked at first.</p>` : ""}`;
+}
+
+vrbBoot("am","Review", async (main) => {
+  [QUEUE, LOANS] = await Promise.all([
+    q("v_review_queue", x => x.order("confidence", {ascending:true, nullsFirst:true})),
+    q("loans", x => x.eq("is_active", true).order("vrb_loan_number"),
+      "id,vrb_loan_number,borrower_name"),
+  ]);
+  QUEUE.forEach(it => {
+    STATE[it.id] = {
+      loanId: it.loan_id || "",
+      category: (it.proposed && it.proposed.category) || "other",
+      recovery: "",           /* never pre-filled — must be a human choice */
+      busy:false, confirming:false, error:null, dups:null, dupReason:"",
+    };
+    if (it.loan_id) checkDups(it.id);
+  });
+  render();
+});
+</script>
+</body>
+</html>

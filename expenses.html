@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Expenses — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+let ROWS = [];
+
+async function patch(id, field, value) {
+  const { error } = await sb.from("expenses").update({ [field]: value }).eq("id", id);
+  if (error) { alert("Could not save: " + error.message); return false; }
+  const row = ROWS.find(r => r.id === id);
+  if (row) row[field] = value;
+  return true;
+}
+
+function totals(rows) {
+  const t = {total:0, rec:0, non:0, undet:0, undetN:0, unpaid:0, unpaidN:0,
+             byCat:{}, byMonth:{}};
+  rows.forEach(e => {
+    const a = N(e.amount) || 0;
+    t.total += a;
+    t.byCat[e.category] = (t.byCat[e.category]||0) + a;
+    if (e.invoice_date) {
+      const m = e.invoice_date.slice(0,7);
+      t.byMonth[m] = (t.byMonth[m]||0) + a;
+    }
+    if (e.recovery === "recoverable_advance") t.rec += a;
+    else if (e.recovery === "non_recoverable") t.non += a;
+    else if (e.recovery === "undetermined") { t.undet += a; t.undetN++; }
+    if (!e.paid_date) { t.unpaid += a; t.unpaidN++; }
+  });
+  return t;
+}
+
+function draw() {
+  const term = document.getElementById("f-q").value.toLowerCase();
+  const rec = document.getElementById("f-rec").value;
+  const cat = document.getElementById("f-cat").value;
+  const paid = document.getElementById("f-paid").value;
+
+  const rows = ROWS.filter(e => {
+    if (rec !== "all" && e.recovery !== rec) return false;
+    if (cat !== "all" && e.category !== cat) return false;
+    if (paid === "unpaid" && e.paid_date) return false;
+    if (paid === "paid" && !e.paid_date) return false;
+    if (term) {
+      const hay = [e.vendor, e.invoice_number, e.description,
+        e.loans && e.loans.vrb_loan_number, e.loans && e.loans.borrower_name].join(" ").toLowerCase();
+      if (!hay.includes(term)) return false;
+    }
+    return true;
+  });
+
+  const t = totals(rows);
+  document.getElementById("cnt").textContent = `${rows.length} shown · ${fmtUSD(t.total,2)}`;
+  document.getElementById("tb").innerHTML = rows.length ? rows.map(e => `
+    <tr class="${e.recovery==="undetermined"?"flag":""}">
+      <td class="mono"><a href="loan.html?id=${e.loan_id}" style="color:var(--blue)">${esc((e.loans||{}).vrb_loan_number||"—")}</a></td>
+      <td>${esc(e.vendor||"—")}${e.duplicate_of?' <span class="pill amber" title="'+esc(e.duplicate_reason||"")+'">dup</span>':""}</td>
+      <td class="mono dim">${esc(e.invoice_number||"—")}</td>
+      <td class="mono dim">${e.invoice_date||"—"}</td>
+      <td>${esc(CATEGORY_LABEL[e.category]||e.category)}</td>
+      <td class="num">${fmtUSD(e.amount,2)}</td>
+      <td><select class="vrb-in" style="padding:4px 8px;font-size:12px"
+            onchange="onRec('${e.id}',this.value,this)">
+        ${Object.keys(RECOVERY_LABEL).map(k =>
+          `<option value="${k}"${e.recovery===k?" selected":""}>${RECOVERY_LABEL[k]}</option>`).join("")}
+      </select></td>
+      <td>${e.paid_date
+        ? `<span class="mono dim">${e.paid_date}</span>`
+        : `<button class="btn sm" onclick="onPaid('${e.id}',this)">Mark paid</button>`}</td>
+    </tr>`).join("")
+    : `<tr><td colspan="8"><div class="empty">No invoices match these filters.</div></td></tr>`;
+}
+
+async function onRec(id, v, el) {
+  el.disabled = true;
+  if (await patch(id, "recovery", v)) { refreshHeader(); draw(); }
+  el.disabled = false;
+}
+async function onPaid(id, btn) {
+  btn.disabled = true; btn.textContent = "Saving…";
+  const today = new Date().toISOString().slice(0,10);
+  if (await patch(id, "paid_date", today)) { refreshHeader(); draw(); }
+  else { btn.disabled = false; btn.textContent = "Mark paid"; }
+}
+
+function refreshHeader() {
+  const t = totals(ROWS);
+  document.getElementById("kpis").innerHTML = `
+    <div class="vrb-kpi ${t.undetN?"warn":""}"><div class="k">Needs classifying</div>
+      <div class="v">${fmtCompact(t.undet)}</div>
+      <div class="s">${t.undetN} invoice${t.undetN===1?"":"s"} · not counted as recoverable</div></div>
+    <div class="vrb-kpi ${t.unpaidN?"warn":""}"><div class="k">Unpaid</div>
+      <div class="v">${fmtCompact(t.unpaid)}</div>
+      <div class="s">${t.unpaidN} invoice${t.unpaidN===1?"":"s"} · no cash flow yet</div></div>
+    <div class="vrb-kpi good"><div class="k">Recoverable advances</div>
+      <div class="v">${fmtCompact(t.rec)}</div><div class="s">owed back at payoff</div></div>
+    <div class="vrb-kpi"><div class="k">Non-recoverable</div>
+      <div class="v">${fmtCompact(t.non)}</div><div class="s">permanent cost</div></div>
+    <div class="vrb-kpi"><div class="k">Total spend</div>
+      <div class="v">${fmtCompact(t.total)}</div><div class="s">${ROWS.length} invoices</div></div>`;
+
+  const box = document.getElementById("undet-alert");
+  box.innerHTML = t.undetN ? `<div class="alert">
+    <b>${t.undetN} invoice${t.undetN===1?"":"s"} totalling ${fmtUSD(t.undet,2)} have no recoverability decision</b>
+    Until each is marked recoverable or not, the amount is not counted as owed back at payoff
+    and will not appear on a payoff quote. Set it in the table below.</div>` : "";
+
+  const cats = Object.entries(t.byCat).sort((a,b)=>b[1]-a[1]);
+  document.getElementById("bycat").innerHTML = cats.length ? cats.map(([c,a]) =>
+    `<tr><td>${esc(CATEGORY_LABEL[c]||c)}</td><td class="num">${fmtUSD(a,2)}</td>
+     <td class="num dim">${fmtPct(a/(t.total||1),1)}</td></tr>`).join("")
+    : `<tr><td colspan="3"><div class="empty">Nothing yet.</div></td></tr>`;
+
+  const months = Object.entries(t.byMonth).sort();
+  const max = Math.max(...months.map(m=>m[1]), 1);
+  document.getElementById("bymonth").innerHTML = months.length ? months.map(([m,a]) =>
+    `<tr><td class="mono">${m}</td>
+     <td style="width:55%"><div style="height:9px;background:var(--navy);border-radius:2px;
+       width:${(a/max)*100}%;min-width:2px"></div></td>
+     <td class="num">${fmtUSD(a,0)}</td></tr>`).join("")
+    : `<tr><td colspan="3"><div class="empty">Nothing yet.</div></td></tr>`;
+}
+
+vrbBoot("am","Expenses", async (main) => {
+  ROWS = await q("expenses",
+    x => x.order("invoice_date", {ascending:false}),
+    "*, loans!inner(vrb_loan_number,borrower_name)");
+
+  const cats = [...new Set(ROWS.map(e=>e.category))].sort();
+
+  main.innerHTML = `
+  <h1 class="vrb-h1">Expenses</h1>
+  <p class="vrb-sub">Every invoice across the book</p>
+  <div class="vrb-kpis" id="kpis"></div>
+  <div id="undet-alert"></div>
+
+  <div style="display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+    <div class="vrb-card"><div class="vrb-card-h"><h2>By category</h2></div>
+      <table class="vrb-t"><thead><tr><th>Category</th><th class="num">Spend</th>
+        <th class="num">Share</th></tr></thead><tbody id="bycat"></tbody></table></div>
+    <div class="vrb-card"><div class="vrb-card-h"><h2>By month</h2>
+      <span class="meta">invoice date</span></div>
+      <table class="vrb-t"><tbody id="bymonth"></tbody></table></div>
+  </div>
+
+  <div class="vrb-filters">
+    <label for="f-q">Search:</label>
+    <input type="text" id="f-q" placeholder="Vendor, invoice number, loan...">
+    <label for="f-rec">Recoverability:</label>
+    <select id="f-rec"><option value="all">All</option>
+      ${Object.keys(RECOVERY_LABEL).map(k=>`<option value="${k}">${RECOVERY_LABEL[k]}</option>`).join("")}</select>
+    <label for="f-cat">Category:</label>
+    <select id="f-cat"><option value="all">All</option>
+      ${cats.map(c=>`<option value="${c}">${CATEGORY_LABEL[c]||c}</option>`).join("")}</select>
+    <label for="f-paid">Payment:</label>
+    <select id="f-paid"><option value="all">All</option>
+      <option value="unpaid">Unpaid</option><option value="paid">Paid</option></select>
+  </div>
+
+  <div class="vrb-card">
+    <div class="vrb-card-h"><h2>All invoices</h2><span class="meta" id="cnt"></span></div>
+    <div class="scrollx"><table class="vrb-t">
+      <thead><tr><th>Loan</th><th>Vendor</th><th>Invoice</th><th>Date</th>
+        <th>Category</th><th class="num">Amount</th><th>Recoverability</th><th>Paid</th></tr></thead>
+      <tbody id="tb"></tbody></table></div>
+  </div>
+  <p class="note">Marking an invoice paid posts a dated cash outflow, which is what makes the
+  loan-level IRR correct. Rows tagged <span class="pill amber">dup</span> were confirmed as
+  deliberate duplicates of an existing charge.</p>`;
+
+  ["f-q","f-rec","f-cat","f-paid"].forEach(id =>
+    document.getElementById(id).addEventListener("input", draw));
+  refreshHeader();
+  draw();
+});
+</script>
+</body>
+</html>

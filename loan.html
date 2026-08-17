@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loan — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+const RESOLVED = new Set(["paid_off","reinstated","note_sold","reo_sold","dil_completed","charged_off"]);
+
+function fld(id, label, val, type) {
+  return `<div><label for="f_${id}" style="display:block;font-size:11px;font-weight:700;
+    color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}</label>
+    <input class="vrb-in" style="width:100%" id="f_${id}" type="${type}"
+      value="${val==null?"":esc(val)}"></div>`;
+}
+const gv = (id) => {
+  const el = document.getElementById(id) || document.getElementById("f_"+id);
+  if (!el) return null;
+  const v = el.value.trim();
+  return v === "" ? null : v;
+};
+function panelMsg(text, bad) {
+  document.getElementById("panel-msg").innerHTML = text
+    ? `<div class="alert${bad?" bad":""}">${esc(text)}</div>` : "";
+}
+function togglePanel() {
+  const p = document.getElementById("panel"), b = document.getElementById("tgl");
+  const open = p.style.display === "none";
+  p.style.display = open ? "" : "none";
+  b.textContent = open ? "Close" : "Open";
+}
+
+async function saveTerms() {
+  const rate = gv("note_rate_pct");
+  const patch = {
+    senior_lien_balance: gv("senior_lien_balance"),
+    original_balance: gv("original_balance"),
+    note_rate: rate == null ? null : Number(rate) / 100,
+    scheduled_pi_payment: gv("scheduled_pi_payment"),
+    acquisition_costs: gv("acquisition_costs"),
+    legal_maturity_date: gv("legal_maturity_date"),
+    expected_resolution_date: gv("expected_resolution_date"),
+    servicer_id: gv("servicer_id"),
+    business_plan: gv("business_plan"),
+  };
+  const { error } = await sb.from("loans").update(patch).eq("id", window.__loan.id);
+  if (error) return panelMsg("Could not save: " + error.message, true);
+  location.reload();
+}
+
+async function saveSnapshot() {
+  if (!gv("s_as_of") || !gv("s_upb"))
+    return panelMsg("As-of date and UPB are both needed.", true);
+  const { error } = await sb.from("loan_snapshots").upsert({
+    loan_id: window.__loan.id, as_of_date: gv("s_as_of"),
+    report_type: "loan_level_detail", upb: gv("s_upb"),
+    days_delinquent: gv("s_dq"), next_due_date: gv("s_next_due"),
+    servicer_advances: gv("s_adv"), accrued_interest: gv("s_int"),
+  }, { onConflict: "loan_id,as_of_date,report_type" });
+  if (error) return panelMsg("Could not save: " + error.message, true);
+  location.reload();
+}
+
+async function saveStatus() {
+  const st = gv("f_status"), d = gv("f_status_date");
+  if (!st || !d) return panelMsg("Pick a status and an effective date.", true);
+  if (["paid_off","note_sold","reo_sold","dil_completed","charged_off"].indexOf(st) >= 0)
+    return panelMsg("That is an exit status — use Record exit below so the proceeds "
+      + "post as a cash inflow.", true);
+  const { error } = await sb.from("loan_events").insert({
+    loan_id: window.__loan.id, event_type: "status_change", event_date: d,
+    status_to: st, description: "Set from loan page", source: "manual",
+    created_by: vrbUser.email,
+  });
+  if (error) return panelMsg("Could not save: " + error.message, true);
+  location.reload();
+}
+
+async function saveValuation() {
+  if (!gv("v_val") || !gv("v_date"))
+    return panelMsg("Value and date are both needed.", true);
+  const { error } = await sb.from("valuations").insert({
+    loan_id: window.__loan.id, valuation_type: document.getElementById("v_type").value,
+    valuation_date: gv("v_date"), as_is_value: gv("v_val"), provider: "Entered manually",
+  });
+  if (error) return panelMsg("Could not save: " + error.message, true);
+  location.reload();
+}
+
+async function saveExit() {
+  const t = document.getElementById("x_type").value;
+  const d = gv("x_date"), pr = gv("x_proceeds");
+  if (!t || !d) return panelMsg("Exit type and date are both needed.", true);
+  if (pr == null && !confirm("No proceeds entered. The exit will be recorded but there "
+      + "will be no realised return or IRR for this loan. Continue?")) return;
+  const { error } = await sb.rpc("record_exit", {
+    p_loan_id: window.__loan.id, p_exit_status: t, p_exit_date: d,
+    p_proceeds: pr == null ? 0 : Number(pr), p_reviewer: vrbUser.email, p_note: null,
+  });
+  if (error) return panelMsg("Could not save: " + error.message, true);
+  location.reload();
+}
+
+vrbBoot("am","Loans", async (main) => {
+  const id = new URLSearchParams(location.search).get("id");
+  if (!id) { main.innerHTML = `<div class="alert bad"><b>No loan specified</b>
+    <a href="loans.html">Back to loans</a></div>`; return; }
+
+  const [loanRows, events, snaps, exps, flows, dates, irrRows, servicers] = await Promise.all([
+    q("v_loan_current", x => x.eq("id", id)),
+    q("loan_events", x => x.eq("loan_id", id).order("event_date", {ascending:false})),
+    q("loan_snapshots", x => x.eq("loan_id", id).order("as_of_date", {ascending:false}).limit(18)),
+    q("expenses", x => x.eq("loan_id", id).order("invoice_date", {ascending:false})),
+    q("loan_cash_flows", x => x.eq("loan_id", id).order("flow_date")),
+    q("key_dates", x => x.eq("loan_id", id).eq("is_resolved", false).order("target_date")),
+    q("v_loan_irr", x => x.eq("loan_id", id)),
+    q("servicers", x => x.eq("is_active", true).order("name"), "id,name"),
+  ]);
+  window.__loan = { id, servicers };
+
+  const r = loanRows[0];
+  if (!r) { main.innerHTML = `<div class="alert bad"><b>Loan not found</b>
+    It may be inactive. <a href="loans.html">Back to loans</a></div>`; return; }
+
+  const exited = RESOLVED.has(r.current_status);
+  const irr = irrRows[0];
+  const asset = ASSET_META[r.asset_class] || {l:r.asset_class, e:""};
+  const spend = exps.reduce((t,e)=>t+(N(e.amount)||0),0);
+  const undet = exps.filter(e=>e.recovery==="undetermined");
+  const unpaid = exps.filter(e=>!e.paid_date);
+
+  const facts = [
+    ["UPB", fmtUSD(r.upb)],
+    ["Purchase price", fmtUSD(r.purchase_price)],
+    ["All-in basis", fmtUSD(r.all_in_basis)],
+    ["Expenses", fmtUSD(r.total_spend)],
+    ["Recoverable advances", fmtUSD(r.recoverable_advances)],
+    ["Collateral value", fmtUSD(r.latest_value)],
+    ["LTV", fmtPct(r.ltv,0)],
+    ["Note rate", fmtPct(r.note_rate,2)],
+    ["Legal maturity", fmtDate(r.legal_maturity_date)],
+    ["Days in stage", r.days_in_status!=null ? r.days_in_status+"d" : "—"],
+    ["Realised IRR", irr && irr.irr!=null ? fmtPct(N(irr.irr),1) : "—"],
+    ["Data as of", fmtDate(r.data_as_of)],
+  ];
+
+  const maxUpb = Math.max(...snaps.map(s=>N(s.upb)||0), 1);
+
+  main.innerHTML = `
+  <p style="margin:0 0 12px"><a href="loans.html" style="color:var(--ink-2);
+    text-decoration:none;font-size:13px;font-weight:600">← All loans</a></p>
+
+  <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px">
+    <div>
+      <h1 class="vrb-h1">${esc(r.borrower_name)}</h1>
+      <p class="vrb-sub" style="margin-bottom:0">
+        <span class="mono">${esc(r.vrb_loan_number)}</span> ·
+        ${esc(r.property_address||"")}, ${esc(r.property_city||"")} ${esc(r.property_state||"")} ·
+        ${asset.e} ${esc(asset.l)} ·
+        ${r.lien_position==="first"?"first":"second"} lien · ${esc(r.servicer_name||"no servicer")}
+      </p>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+      ${statusPill(r.current_status)}
+      ${r.deal_id ? `<a class="btn ghost" href="index.html">View source deal</a>` : ""}
+    </div>
+  </div>
+
+  ${undet.length ? `<div class="alert"><b>${undet.length} invoice${undet.length>1?"s":""} without a recoverability decision</b>
+    ${fmtUSD(undet.reduce((t,e)=>t+(N(e.amount)||0),0))} unclassified. Set it on the
+    <a href="expenses.html">Expenses</a> page — until then it is not counted as recoverable at payoff.</div>` : ""}
+
+  <div class="vrb-kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+    ${facts.slice(0,6).map(([k,v]) =>
+      `<div class="vrb-kpi"><div class="k">${k}</div><div class="v" style="font-size:20px">${v}</div></div>`).join("")}
+  </div>
+
+  <div style="display:grid;gap:20px;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)">
+    <div>
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Balance history</h2>
+          <span class="meta">${snaps.length} reporting periods</span></div>
+        ${snaps.length ? `<div class="scrollx"><table class="vrb-t">
+          <thead><tr><th>Period</th><th class="num">UPB</th><th>Trend</th>
+            <th class="num">Days DQ</th><th class="num">Collected</th>
+            <th class="num">Advances</th></tr></thead>
+          <tbody>${snaps.map(s => `<tr>
+            <td class="mono">${s.as_of_date}</td>
+            <td class="num">${fmtUSD(s.upb)}</td>
+            <td><div style="height:7px;background:var(--navy);border-radius:2px;
+              width:${((N(s.upb)||0)/maxUpb)*100}%;min-width:2px"></div></td>
+            <td class="num">${s.days_delinquent??"—"}</td>
+            <td class="num">${N(s.pi_collected)?fmtUSD(s.pi_collected):'<span class="dim">—</span>'}</td>
+            <td class="num">${N(s.servicer_advances)?fmtUSD(s.servicer_advances):'<span class="dim">—</span>'}</td>
+          </tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">No servicer snapshots yet. They appear once a servicer file is loaded.</div>`}
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Expenses</h2>
+          <span class="meta">${exps.length} invoices · ${fmtUSD(spend)}${unpaid.length?` · ${unpaid.length} unpaid`:""}</span></div>
+        ${exps.length ? `<div class="scrollx"><table class="vrb-t">
+          <thead><tr><th>Date</th><th>Vendor</th><th>Category</th>
+            <th class="num">Amount</th><th>Recoverability</th><th>Paid</th></tr></thead>
+          <tbody>${exps.map(e => `<tr class="${e.recovery==="undetermined"?"flag":""}">
+            <td class="mono dim">${e.invoice_date||"—"}</td>
+            <td>${esc(e.vendor||"—")}${e.duplicate_of?' <span class="pill amber">dup</span>':""}</td>
+            <td>${esc(CATEGORY_LABEL[e.category]||e.category)}</td>
+            <td class="num">${fmtUSD(e.amount,2)}</td>
+            <td>${e.recovery==="recoverable_advance"?'<span class="pill green">Recoverable</span>'
+                : e.recovery==="non_recoverable"?'<span class="pill gray">Non-recoverable</span>'
+                : e.recovery==="undetermined"?'<span class="pill amber">Undecided</span>'
+                : `<span class="pill blue">${esc(RECOVERY_LABEL[e.recovery]||e.recovery)}</span>`}</td>
+            <td class="dim">${e.paid_date||"unpaid"}</td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">No expenses logged against this loan.</div>`}
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Cash flows</h2>
+          <span class="meta">${irr && irr.irr!=null
+            ? "IRR "+fmtPct(N(irr.irr),1)
+            : "IRR needs at least one inflow"}</span></div>
+        ${flows.length ? `<div class="scrollx"><table class="vrb-t">
+          <thead><tr><th>Date</th><th>Type</th><th class="num">Amount</th><th>Description</th></tr></thead>
+          <tbody>${flows.map(f => `<tr>
+            <td class="mono">${f.flow_date}</td>
+            <td>${esc(String(f.flow_type).replace(/_/g," "))}</td>
+            <td class="num" style="color:${N(f.amount)<0?"var(--red)":"var(--green)"}">${fmtUSD(f.amount,2)}</td>
+            <td class="dim">${esc(f.description||"")}</td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">No cash flows recorded.</div>`}
+      </div>
+    </div>
+
+    <div>
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Timeline</h2><span class="meta">${events.length} events</span></div>
+        ${events.length ? `<div style="max-height:430px;overflow-y:auto">
+          <table class="vrb-t"><tbody>${events.map(e => `<tr>
+            <td class="mono dim" style="width:88px;vertical-align:top">${e.event_date}</td>
+            <td><div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+              color:var(--ink-3);font-weight:700">${esc(String(e.event_type).replace(/_/g," "))}
+              ${e.status_to?` → ${esc((STATUS_META[e.status_to]||{}).l||e.status_to)}`:""}</div>
+              <div style="margin-top:2px">${esc(e.description||"")}</div>
+              ${e.amount?`<div class="mono dim" style="font-size:12px">${fmtUSD(e.amount,2)}</div>`:""}
+            </td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">No events logged yet.</div>`}
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Key dates</h2></div>
+        ${dates.length ? `<table class="vrb-t"><tbody>${dates.map(d => {
+          const out = Math.round((new Date(d.target_date) - new Date())/86400000);
+          return `<tr><td class="mono" style="width:60px;color:var(--navy);font-weight:700">${out}d</td>
+            <td>${esc(d.date_type)}${d.is_confirmed?"":' <span class="dim">unconfirmed</span>'}</td>
+            <td class="num dim">${fmtDate(d.target_date)}</td></tr>`;}).join("")}</tbody></table>`
+          : `<div class="empty">Nothing pending.</div>`}
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Fill in missing data</h2>
+          <button class="btn ghost" onclick="togglePanel()" id="tgl">Open</button></div>
+        <div class="vrb-card-b" id="panel" style="display:none">
+          <div id="panel-msg"></div>
+
+          <h3 style="font-size:13px;margin:0 0 8px">Loan terms</h3>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
+            ${fld("senior_lien_balance","Senior lien balance",r.senior_lien_balance,"number")}
+            ${fld("original_balance","Original balance",r.original_balance,"number")}
+            ${fld("note_rate_pct","Note rate (%)",r.note_rate!=null?(N(r.note_rate)*100).toFixed(4):"","number")}
+            ${fld("scheduled_pi_payment","Scheduled P&I",r.scheduled_pi_payment,"number")}
+            ${fld("acquisition_costs","Acquisition costs",r.acquisition_costs,"number")}
+            ${fld("legal_maturity_date","Legal maturity",r.legal_maturity_date,"date")}
+            ${fld("expected_resolution_date","Expected resolution",r.expected_resolution_date,"date")}
+          </div>
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+            text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px">Servicer</label>
+          <select class="vrb-in" id="f_servicer_id" style="width:100%">
+            <option value="">— none —</option>
+            ${servicers.map(sv=>`<option value="${sv.id}">${esc(sv.name)}</option>`).join("")}
+          </select>
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+            text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px">Business plan</label>
+          <input class="vrb-in" id="f_business_plan" style="width:100%"
+            value="${esc(r.business_plan||"")}">
+          <div style="margin-top:12px"><button class="btn" onclick="saveTerms()">Save loan terms</button></div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
+          <h3 style="font-size:13px;margin:0 0 8px">Update balance from a servicer report</h3>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
+            ${fld("s_as_of","As of date","","date")}
+            ${fld("s_upb","Current UPB","","number")}
+            ${fld("s_dq","Days delinquent","","number")}
+            ${fld("s_next_due","Next due date","","date")}
+            ${fld("s_adv","Servicer advances","","number")}
+            ${fld("s_int","Accrued interest","","number")}
+          </div>
+          <div style="margin-top:12px"><button class="btn" onclick="saveSnapshot()">Add snapshot</button></div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
+          <h3 style="font-size:13px;margin:0 0 8px">Set status</h3>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
+            <div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+              text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Status</label>
+              <select class="vrb-in" id="f_status" style="width:100%">
+                <option value="">Choose…</option>
+                ${Object.keys(STATUS_META).map(k=>`<option value="${k}">${STATUS_META[k].l}</option>`).join("")}
+              </select></div>
+            ${fld("f_status_date","Effective date","","date")}
+          </div>
+          <div style="margin-top:12px"><button class="btn" onclick="saveStatus()">Set status</button></div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
+          <h3 style="font-size:13px;margin:0 0 8px">Add valuation</h3>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr">
+            ${fld("v_val","As-is value","","number")}
+            ${fld("v_date","Valuation date","","date")}
+            <div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+              text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Type</label>
+              <select class="vrb-in" id="v_type" style="width:100%">
+                ${["bpo","appraisal","avm","tax_assessment","broker_opinion_verbal","list_price"]
+                  .map(t=>`<option value="${t}">${t.replace(/_/g," ")}</option>`).join("")}
+              </select></div>
+          </div>
+          <div style="margin-top:12px"><button class="btn" onclick="saveValuation()">Add valuation</button></div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
+          <h3 style="font-size:13px;margin:0 0 8px">Record exit</h3>
+          <p class="note" style="margin:0 0 8px">Proceeds post as a cash inflow, which is what
+            makes IRR and realised multiple compute.</p>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr">
+            <div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+              text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Exit type</label>
+              <select class="vrb-in" id="x_type" style="width:100%">
+                <option value="">Choose…</option>
+                ${["paid_off","note_sold","reo_sold","dil_completed","charged_off"]
+                  .map(t=>`<option value="${t}">${STATUS_META[t].l}</option>`).join("")}
+              </select></div>
+            ${fld("x_date","Exit date","","date")}
+            ${fld("x_proceeds","Proceeds","","number")}
+          </div>
+          <div style="margin-top:12px"><button class="btn" onclick="saveExit()">Record exit</button></div>
+        </div>
+      </div>
+
+      <div class="vrb-card">
+        <div class="vrb-card-h"><h2>Details</h2></div>
+        <table class="vrb-t"><tbody>${facts.slice(6).map(([k,v]) =>
+          `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}
+          <tr><td>Entity</td><td class="num">${esc(r.entity_name||"—")}</td></tr>
+          <tr><td>Acquired</td><td class="num">${fmtDate(r.acquisition_date)}</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+  </div>`;
+});
+</script>
+</body>
+</html>

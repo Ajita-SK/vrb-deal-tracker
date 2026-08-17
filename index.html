@@ -33,6 +33,23 @@ body{font-family:Arial,sans-serif;background:#F0F4FA;color:#1a1a2e;min-height:10
 .nav-status.disconnected{background:#8b1a1a;color:#FADADD}
 .btn-export-nav{background:#2E5FA3;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer}
 .btn-export-nav:hover{background:#378ADD}
+.nav-switch{display:flex;gap:4px;background:rgba(255,255,255,.10);padding:3px;border-radius:8px;margin-left:16px}
+.nav-switch a{padding:6px 14px;border-radius:6px;color:rgba(255,255,255,.72);text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap}
+.nav-switch a.on{background:#fff;color:#1F3864}
+.nav-switch a:hover:not(.on){color:#fff;background:rgba(255,255,255,.08)}
+.nav-who{color:#D9E1F2;font-size:12px}
+.nav-signout{background:none;border:1px solid rgba(255,255,255,.35);color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700}
+.nav-signout:hover{background:rgba(255,255,255,.12)}
+.gate{position:fixed;inset:0;z-index:9999;background:#1F3864;display:flex;align-items:center;justify-content:center;padding:20px}
+.gate.hidden{display:none}
+.gate-card{background:#fff;border-radius:14px;padding:36px;width:100%;max-width:400px;font-family:inherit}
+.gate-card h1{color:#1F3864;font-size:26px;font-weight:800;margin-bottom:4px}
+.gate-card p.s{color:#5B6B7F;font-size:13px;margin-bottom:22px}
+.gate-card label{display:block;font-size:11px;font-weight:700;color:#5B6B7F;margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em}
+.gate-card input{width:100%;padding:11px 13px;border:1px solid #D9E1F2;border-radius:8px;font-size:14px;margin-bottom:14px;font-family:inherit}
+.gate-card button{width:100%;padding:12px;background:#1F3864;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+.gate-card button:disabled{opacity:.5;cursor:not-allowed}
+.gate-msg{margin-top:14px;font-size:13px;padding:11px 13px;border-radius:8px;background:#FBE3E1;color:#B3261E}
 .header{background:#1F3864;padding:24px 32px 0;border-bottom:3px solid #2E5FA3}
 .header h1{color:#fff;font-size:22px;font-weight:700;letter-spacing:.5px}
 .header-sub{color:#85B7EB;font-size:12px;margin-top:4px}
@@ -198,11 +215,33 @@ tbody td{padding:10px 12px;color:#2d3748;vertical-align:top}
 <div class="toast" id="toast"></div>
 
 
+<!-- LOGIN GATE -->
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <h1>VRB Capital</h1>
+    <p class="s">Deal Tracker &amp; Asset Management</p>
+    <form id="gate-form">
+      <label for="gate-em">Email</label>
+      <input id="gate-em" type="email" autocomplete="username" required placeholder="you@vrbcap.com">
+      <label for="gate-pw">Password</label>
+      <input id="gate-pw" type="password" autocomplete="current-password" required>
+      <button type="submit" id="gate-btn">Sign in</button>
+    </form>
+    <div class="gate-msg" id="gate-msg" style="display:none"></div>
+  </div>
+</div>
+
 <div class="nav">
   <div class="nav-logo">VRB Capital <span>Deal Tracker</span></div>
+  <div class="nav-switch">
+    <a href="index.html" class="on">Deal Tracker</a>
+    <a href="portfolio.html">Asset Management</a>
+  </div>
   <div class="nav-right">
     <span class="nav-status disconnected" id="nav-status">● Offline</span>
     <button class="btn-export-nav" onclick="exportCSV()">⬇ Export CSV</button>
+    <span class="nav-who" id="nav-who"></span>
+    <button class="nav-signout" id="nav-signout">Sign out</button>
     <div class="nav-date" id="nav-date"></div>
   </div>
 </div>
@@ -490,6 +529,7 @@ const TODAY=new Date();TODAY.setHours(0,0,0,0);
 const NAVY='#1F3864',BLUE='#2E5FA3',GREEN='#27ae60',AMBER='#f39c12',RED='#e74c3c',TEAL='#1D9E75';
 let deals=[],activeTab='all',sortField=null,sortDir=1,editingId=null,deletingId=null,alertsVisible=true,charts={},watchFilterOn=false;
 let _url='',_key='';
+let _token='',_sb=null,_user=null;
 
 /* ── UTILS ── */
 function fmt$(n){if(!n&&n!==0)return'—';return'$'+Number(n).toLocaleString('en-US');}
@@ -548,7 +588,7 @@ async function loadDeals(){
   showLoading('Loading deals...');
   try{
     const r=await fetch(_url+'/rest/v1/deals?order=id.desc&select=*',{
-      headers:{'apikey':_key,'Authorization':'Bearer '+_key,'Accept':'application/json'}
+      headers:{'apikey':_key,'Authorization':'Bearer '+_token,'Accept':'application/json'}
     });
     if(!r.ok){const t=await r.text();throw new Error('HTTP '+r.status+': '+t);}
     const data=await r.json();
@@ -565,7 +605,7 @@ async function loadDeals(){
 async function insertDeal(d){
   const r=await fetch(_url+'/rest/v1/deals',{
     method:'POST',
-    headers:{'apikey':_key,'Authorization':'Bearer '+_key,'Content-Type':'application/json','Prefer':'return=representation'},
+    headers:{'apikey':_key,'Authorization':'Bearer '+_token,'Content-Type':'application/json','Prefer':'return=representation'},
     body:JSON.stringify(toRow(d))
   });
   const data=await r.json();
@@ -575,7 +615,7 @@ async function insertDeal(d){
 async function updateDeal(id,d){
   const r=await fetch(_url+'/rest/v1/deals?id=eq.'+id,{
     method:'PATCH',
-    headers:{'apikey':_key,'Authorization':'Bearer '+_key,'Content-Type':'application/json','Prefer':'return=representation'},
+    headers:{'apikey':_key,'Authorization':'Bearer '+_token,'Content-Type':'application/json','Prefer':'return=representation'},
     body:JSON.stringify(toRow(d))
   });
   const data=await r.json();
@@ -585,7 +625,7 @@ async function updateDeal(id,d){
 async function deleteDeal(id){
   const r=await fetch(_url+'/rest/v1/deals?id=eq.'+id,{
     method:'DELETE',
-    headers:{'apikey':_key,'Authorization':'Bearer '+_key}
+    headers:{'apikey':_key,'Authorization':'Bearer '+_token}
   });
   if(!r.ok){const t=await r.text();throw new Error('Delete failed '+r.status+': '+t);}
 }
@@ -595,7 +635,7 @@ async function toggleWatch(id){
   const v=!d.watching;
   const r=await fetch(_url+'/rest/v1/deals?id=eq.'+id,{
     method:'PATCH',
-    headers:{'apikey':_key,'Authorization':'Bearer '+_key,'Content-Type':'application/json'},
+    headers:{'apikey':_key,'Authorization':'Bearer '+_token,'Content-Type':'application/json'},
     body:JSON.stringify({watching:v})
   });
   if(!r.ok){toast('Watch failed','error');return;}
@@ -1101,9 +1141,78 @@ applyFilters();
 
 const SURL='https://fcbipuwbsdihnxkhzjva.supabase.co';
 const SKEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjYmlwdXdic2RpaG54a2h6anZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjAzNDAsImV4cCI6MjA5MjIzNjM0MH0.zp61OxzKX0AcAuWVCrEqkwx9-iwWntQyvF5aK7rSkVs';
-initSupabase(SURL, SKEY);
+
+/* ── AUTH GATE ──
+   Anonymous access to the deals table is revoked, so every REST call now
+   carries the signed-in user's access token instead of the anon key. The
+   anon key above is still needed to reach the auth endpoint, and is safe
+   in public source: it grants nothing on its own. */
+function gateMsg(t){
+  const b=document.getElementById('gate-msg');
+  b.style.display=t?'':'none'; b.textContent=t||'';
+}
+function showGate(){
+  document.getElementById('gate').classList.remove('hidden');
+}
+async function bootAuth(){
+  for(let i=0;i<40 && !window.supabase;i++) await new Promise(r=>setTimeout(r,150));
+  if(!window.supabase){
+    hideLoading(); showGate();
+    gateMsg('Could not load the Supabase library. Check your connection and reload.');
+    return;
+  }
+  _sb = window.supabase.createClient(SURL, SKEY);
+  _url = SURL; _key = SKEY;
+
+  const {data:{session}} = await _sb.auth.getSession();
+  if(!session){ hideLoading(); showGate(); return; }
+
+  const {data:ok, error:okErr} = await _sb.rpc('is_allowed');
+  if(okErr || !ok){
+    await _sb.auth.signOut();
+    hideLoading(); showGate();
+    gateMsg('That account is not authorised for this dashboard.');
+    return;
+  }
+
+  _user = session.user;
+  _token = session.access_token;
+
+  /* Access tokens expire after about an hour. supabase-js refreshes them in
+     the background, so track the new one or every fetch starts 401-ing. */
+  _sb.auth.onAuthStateChange((_evt, sess)=>{
+    if(sess && sess.access_token) _token = sess.access_token;
+  });
+  document.getElementById('nav-who').textContent = _user.email;
+  document.getElementById('gate').classList.add('hidden');
+  loadDeals();
+}
+
+document.getElementById('gate-form').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const btn=document.getElementById('gate-btn');
+  btn.disabled=true; btn.textContent='Signing in...'; gateMsg('');
+  const {error}=await _sb.auth.signInWithPassword({
+    email:document.getElementById('gate-em').value.trim(),
+    password:document.getElementById('gate-pw').value
+  });
+  if(error){
+    gateMsg(error.message.indexOf('Invalid')>=0
+      ? 'That email and password combination was not recognised.'
+      : error.message);
+    btn.disabled=false; btn.textContent='Sign in';
+  } else { location.reload(); }
+});
+
+document.getElementById('nav-signout').addEventListener('click', async ()=>{
+  if(_sb) await _sb.auth.signOut();
+  location.reload();
+});
+
+bootAuth();
 
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
 </body>
 </html>
