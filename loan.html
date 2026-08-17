@@ -60,7 +60,51 @@ async function saveSnapshot() {
     report_type: "loan_level_detail", upb: gv("s_upb"),
     days_delinquent: gv("s_dq"), next_due_date: gv("s_next_due"),
     servicer_advances: gv("s_adv"), accrued_interest: gv("s_int"),
+    pi_collected: gv("s_pi"), net_remittance: gv("s_net"),
   }, { onConflict: "loan_id,as_of_date,report_type" });
+  if (error) return panelMsg("Could not save: " + error.message, true);
+  location.reload();
+}
+
+async function checkExpenseDup() {
+  const amt = gv("e_amount"), date = gv("e_date");
+  if (!amt || !date) { document.getElementById("exp-dup-warn").innerHTML = ""; return; }
+  const { data } = await sb.rpc("check_expense_duplicates", {
+    p_loan_id: window.__loan.id, p_amount: Number(amt), p_invoice_date: date,
+    p_vendor: gv("e_vendor"), p_invoice_number: gv("e_invnum"),
+  });
+  const box = document.getElementById("exp-dup-warn");
+  if (data && data.length) {
+    box.innerHTML = `<div class="alert"><b>This looks like it may already be recorded</b>
+      ${data.length} possible match${data.length===1?"":"es"} on this loan with the same
+      date and amount. Saving will still go through if you confirm.</div>`;
+  } else box.innerHTML = "";
+}
+
+async function saveExpense() {
+  const recovery = gv("e_recovery");
+  const amount = gv("e_amount"), date = gv("e_date");
+  if (!amount || !date || !recovery)
+    return panelMsg("Amount, invoice date and recoverability are all needed.", true);
+
+  const { data: dups } = await sb.rpc("check_expense_duplicates", {
+    p_loan_id: window.__loan.id, p_amount: Number(amount), p_invoice_date: date,
+    p_vendor: gv("e_vendor"), p_invoice_number: gv("e_invnum"),
+  });
+  if (dups && dups.length &&
+      !confirm(`${dups.length} possible duplicate${dups.length===1?"":"s"} found on this loan `
+        + `with the same date and amount. Save anyway?`)) return;
+
+  document.getElementById("e-save-btn").disabled = true;
+  const { error } = await sb.from("expenses").insert({
+    loan_id: window.__loan.id, category: gv("e_category"), recovery,
+    vendor: gv("e_vendor"), invoice_number: gv("e_invnum"), invoice_date: date,
+    amount: Number(amount), paid_date: gv("e_paid"), description: gv("e_desc"),
+    created_by: vrbUser.email,
+    duplicate_of: (dups && dups.length && dups[0].source === "expense") ? dups[0].row_id : null,
+    duplicate_reason: (dups && dups.length) ? "Confirmed as a separate charge by " + vrbUser.email : null,
+  });
+  document.getElementById("e-save-btn").disabled = false;
   if (error) return panelMsg("Could not save: " + error.message, true);
   location.reload();
 }
@@ -110,6 +154,9 @@ vrbBoot("am","Loans", async (main) => {
   if (!id) { main.innerHTML = `<div class="alert bad"><b>No loan specified</b>
     <a href="loans.html">Back to loans</a></div>`; return; }
 
+  document.addEventListener("input", (e) => {
+    if (["f_e_amount","f_e_date","f_e_vendor","f_e_invnum"].includes(e.target.id)) checkExpenseDup();
+  });
   const [loanRows, events, snaps, exps, flows, dates, irrRows, servicers] = await Promise.all([
     q("v_loan_current", x => x.eq("id", id)),
     q("loan_events", x => x.eq("loan_id", id).order("event_date", {ascending:false})),
@@ -289,16 +336,47 @@ vrbBoot("am","Loans", async (main) => {
           <div style="margin-top:12px"><button class="btn" onclick="saveTerms()">Save loan terms</button></div>
 
           <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
-          <h3 style="font-size:13px;margin:0 0 8px">Update balance from a servicer report</h3>
+          <h3 style="font-size:13px;margin:0 0 8px">Update balance &amp; record collections</h3>
+          <p class="note" style="margin:0 0 8px">From a servicer report or monthly statement.
+            Net remittance / P&amp;I collected posts as a cash inflow — this is what makes IRR
+            move on a performing loan, not just at exit.</p>
           <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
             ${fld("s_as_of","As of date","","date")}
             ${fld("s_upb","Current UPB","","number")}
             ${fld("s_dq","Days delinquent","","number")}
             ${fld("s_next_due","Next due date","","date")}
-            ${fld("s_adv","Servicer advances","","number")}
+            ${fld("s_pi","P&I collected this period","","number")}
+            ${fld("s_net","Net remittance received","","number")}
+            ${fld("s_adv","Servicer advances outstanding","","number")}
             ${fld("s_int","Accrued interest","","number")}
           </div>
-          <div style="margin-top:12px"><button class="btn" onclick="saveSnapshot()">Add snapshot</button></div>
+          <div style="margin-top:12px"><button class="btn" onclick="saveSnapshot()">Save</button></div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
+          <h3 style="font-size:13px;margin:0 0 8px">Add expense</h3>
+          <div id="exp-dup-warn"></div>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr">
+            ${fld("e_vendor","Vendor","","text")}
+            ${fld("e_invnum","Invoice number","","text")}
+            ${fld("e_date","Invoice date","","date")}
+            ${fld("e_amount","Amount","","number")}
+            ${fld("e_paid","Paid date (leave blank if unpaid)","","date")}
+          </div>
+          <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr;margin-top:8px">
+            <div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+              text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Category</label>
+              <select class="vrb-in" id="f_e_category" style="width:100%">
+                ${Object.keys(CATEGORY_LABEL).map(c=>`<option value="${c}">${CATEGORY_LABEL[c]}</option>`).join("")}
+              </select></div>
+            <div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+              text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Recoverability — required</label>
+              <select class="vrb-in" id="f_e_recovery" style="width:100%">
+                <option value="">Decide…</option>
+                ${Object.keys(RECOVERY_LABEL).map(k=>`<option value="${k}">${RECOVERY_LABEL[k]}</option>`).join("")}
+              </select></div>
+          </div>
+          ${fld("e_desc","Description","","text")}
+          <div style="margin-top:12px"><button class="btn" id="e-save-btn" onclick="saveExpense()">Add expense</button></div>
 
           <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
           <h3 style="font-size:13px;margin:0 0 8px">Set status</h3>

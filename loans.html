@@ -108,6 +108,7 @@ vrbBoot("am","Loans", async (main) => {
     <select id="f-svc"><option value="all">All servicers</option>
       ${svcs.map(s=>`<option>${esc(s)}</option>`).join("")}</select>
     <button class="btn ghost" id="clr">Clear filters</button>
+    <a href="loan-new.html" class="btn" style="margin-left:auto;text-decoration:none">+ Add loan</a>
   </div>
 
   <div class="vrb-card"><div class="scrollx"><table class="vrb-t">

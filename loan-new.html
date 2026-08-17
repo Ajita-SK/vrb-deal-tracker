@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Add loan — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+function fld(id, label, opts) {
+  opts = opts || {};
+  const type = opts.type || "text";
+  const req = opts.req ? " *" : "";
+  return `<div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+    text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}${req}</label>
+    <input class="vrb-in" style="width:100%" id="f_${id}" type="${type}"
+      placeholder="${opts.ph||""}"></div>`;
+}
+function selfld(id, label, options, req) {
+  return `<div><label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);
+    text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}${req?" *":""}</label>
+    <select class="vrb-in" style="width:100%" id="f_${id}">
+      <option value="">Choose…</option>${options}</select></div>`;
+}
+const gv = (id) => {
+  const el = document.getElementById("f_"+id);
+  if (!el) return null;
+  const v = el.value.trim();
+  return v === "" ? null : v;
+};
+
+async function save() {
+  const msg = document.getElementById("msg");
+  msg.innerHTML = "";
+  const required = ["vrb_loan_number","entity_id","borrower_name","asset_class",
+                     "lien_position","acquisition_type","acquisition_date","purchase_price"];
+  const missing = required.filter(k => !gv(k));
+  if (missing.length) {
+    msg.innerHTML = `<div class="alert bad"><b>Missing required fields</b>
+      ${missing.join(", ")}</div>`;
+    return;
+  }
+  const rate = gv("note_rate_pct");
+  const row = {
+    vrb_loan_number: gv("vrb_loan_number"),
+    servicer_loan_number: gv("servicer_loan_number"),
+    entity_id: gv("entity_id"),
+    servicer_id: gv("servicer_id"),
+    borrower_name: gv("borrower_name"),
+    property_address: gv("property_address"),
+    property_city: gv("property_city"),
+    property_state: gv("property_state"),
+    property_zip: gv("property_zip"),
+    county: gv("county"),
+    asset_class: gv("asset_class"),
+    unit_count: gv("unit_count"),
+    lien_position: gv("lien_position"),
+    senior_lien_balance: gv("senior_lien_balance"),
+    original_balance: gv("original_balance"),
+    note_rate: rate == null ? null : Number(rate) / 100,
+    origination_date: gv("origination_date"),
+    legal_maturity_date: gv("legal_maturity_date"),
+    scheduled_pi_payment: gv("scheduled_pi_payment"),
+    acquisition_type: gv("acquisition_type"),
+    acquisition_date: gv("acquisition_date"),
+    purchase_price: gv("purchase_price"),
+    upb_at_acquisition: gv("upb_at_acquisition"),
+    acquisition_costs: gv("acquisition_costs"),
+    seller_name: gv("seller_name"),
+    pool_name: gv("pool_name"),
+    business_plan: gv("business_plan"),
+    notes: gv("notes"),
+  };
+  document.getElementById("save-btn").disabled = true;
+  const { data, error } = await sb.from("loans").insert(row).select("id").single();
+  document.getElementById("save-btn").disabled = false;
+  if (error) {
+    msg.innerHTML = `<div class="alert bad"><b>Could not save</b>${esc(error.message)}</div>`;
+    return;
+  }
+  const status = gv("initial_status");
+  if (status) {
+    await sb.from("loan_events").insert({
+      loan_id: data.id, event_type: "status_change", event_date: gv("acquisition_date"),
+      status_to: status, description: "Initial status at onboarding",
+      source: "manual", created_by: vrbUser.email,
+    });
+  }
+  location.href = "loan.html?id=" + data.id;
+}
+
+vrbBoot("am","Loans", async (main) => {
+  const [entities, servicers] = await Promise.all([
+    q("entities", x => x.eq("is_active", true).order("name"), "id,name"),
+    q("servicers", x => x.eq("is_active", true).order("name"), "id,name"),
+  ]);
+
+  main.innerHTML = `
+  <p style="margin:0 0 12px"><a href="loans.html" style="color:var(--ink-2);
+    text-decoration:none;font-size:13px;font-weight:600">← All loans</a></p>
+  <h1 class="vrb-h1">Add a loan</h1>
+  <p class="vrb-sub">Fields marked * are required. Everything else can be filled in later
+    from the loan page.</p>
+  <div id="msg"></div>
+
+  <div class="vrb-card"><div class="vrb-card-b">
+    <h3 style="font-size:13px;margin:0 0 8px">Identification</h3>
+    <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr">
+      ${fld("vrb_loan_number","VRB loan number",{req:true,ph:"VRB-2409"})}
+      ${fld("servicer_loan_number","Servicer loan number")}
+      ${selfld("entity_id","Owning entity", entities.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join(""), true)}
+    </div>
+
+    <h3 style="font-size:13px;margin:18px 0 8px">Borrower &amp; property</h3>
+    <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
+      ${fld("borrower_name","Borrower name",{req:true})}
+      ${fld("property_address","Property address")}
+      ${fld("property_city","City")}
+      ${fld("property_state","State",{ph:"GA"})}
+      ${fld("property_zip","Zip")}
+      ${fld("county","County")}
+    </div>
+    <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr;margin-top:8px">
+      ${selfld("asset_class","Asset class",
+        ["residential_1_4","multifamily","hotel","commercial_other","land"]
+          .map(a=>`<option value="${a}">${(ASSET_META[a]||{l:a}).l}</option>`).join(""), true)}
+      ${fld("unit_count","Units")}
+      ${selfld("lien_position","Lien position",
+        ["first","second","other"].map(l=>`<option value="${l}">${l}</option>`).join(""), true)}
+    </div>
+    ${fld("senior_lien_balance","Senior lien balance (2nd liens)")}
+
+    <h3 style="font-size:13px;margin:18px 0 8px">Note terms</h3>
+    <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr">
+      ${fld("original_balance","Original balance",{type:"number"})}
+      ${fld("note_rate_pct","Note rate (%)",{type:"number",ph:"5.83"})}
+      ${fld("scheduled_pi_payment","Scheduled P&I",{type:"number"})}
+      ${fld("origination_date","Origination date",{type:"date"})}
+      ${fld("legal_maturity_date","Legal maturity",{type:"date"})}
+      ${selfld("servicer_id","Servicer", servicers.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(""))}
+    </div>
+
+    <h3 style="font-size:13px;margin:18px 0 8px">Acquisition</h3>
+    <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr">
+      ${selfld("acquisition_type","Acquisition type",
+        ["note_purchase","pool_purchase","originated","deed_in_lieu","foreclosure_credit_bid"]
+          .map(a=>`<option value="${a}">${a.replace(/_/g," ")}</option>`).join(""), true)}
+      ${fld("acquisition_date","Acquisition date",{type:"date",req:true})}
+      ${fld("purchase_price","Purchase price",{type:"number",req:true})}
+      ${fld("upb_at_acquisition","UPB at acquisition",{type:"number"})}
+      ${fld("acquisition_costs","Acquisition costs",{type:"number"})}
+      ${fld("seller_name","Seller name")}
+    </div>
+    ${fld("pool_name","Pool name (if bought in a pool)")}
+
+    <h3 style="font-size:13px;margin:18px 0 8px">Status &amp; plan</h3>
+    <div style="display:grid;gap:8px;grid-template-columns:1fr 2fr">
+      ${selfld("initial_status","Status at acquisition",
+        Object.keys(STATUS_META).map(k=>`<option value="${k}">${STATUS_META[k].l}</option>`).join(""))}
+      ${fld("business_plan","Business plan",{ph:"e.g. foreclose to REO, DPO, reinstate"})}
+    </div>
+    ${fld("notes","Notes")}
+
+    <div style="margin-top:18px">
+      <button class="btn" id="save-btn" onclick="save()">Save loan</button>
+    </div>
+  </div></div>`;
+});
+</script>
+</body>
+</html>
