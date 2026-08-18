@@ -81,6 +81,13 @@ h1.vrb-h1{margin:0 0 4px;font-size:26px;font-weight:800;letter-spacing:-.02em}
 .vrb-kpi.warn .v{color:var(--amber)}
 .vrb-kpi.bad .v{color:var(--red)}
 .vrb-kpi.good .v{color:var(--green)}
+.vrb-neg{color:var(--red)}
+.vrb-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.vrb-bars li{display:grid;grid-template-columns:64px 1fr 90px;gap:10px;align-items:center}
+.vrb-bar-label{font-size:11px;color:var(--ink-2)}
+.vrb-bar-track{background:var(--gray-bg);border-radius:4px;height:16px;overflow:visible;display:block}
+.vrb-bar-fill{display:block;height:100%;background:var(--navy);border-radius:4px}
+.vrb-bar-value{font-size:12px;text-align:right}
 
 /* cards + tables */
 .vrb-card{background:var(--card);border:1px solid var(--line);border-radius:10px;
@@ -315,7 +322,8 @@ async function vrbBoot(activeSection, activeTab, render) {
 
 const AM_TABS = [
   ["portfolio.html", "Portfolio"], ["loans.html", "Loans"],
-  ["expenses.html", "Expenses"], ["review.html", "Review"],
+  ["income.html", "Income"], ["expenses.html", "Expenses"],
+  ["review.html", "Review"],
 ];
 function vrbHeader(section, tab) {
   const today = new Date().toLocaleDateString("en-US",

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Income — VRB Capital</title>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="vrb-shared.js"></script>
+<script>
+function fmtMonth(m) {
+  const [y, mo] = m.split("-");
+  return new Date(Number(y), Number(mo) - 1, 1)
+    .toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+vrbBoot("am", "Income", async (main) => {
+  const [monthly, byLoanRate, realized] = await Promise.all([
+    q("v_portfolio_collections"),
+    q("v_collection_rate"),
+    q("v_realised"),
+  ]);
+
+  const nums = (rows, ...keys) =>
+    rows.map((r) => {
+      const o = { ...r };
+      keys.forEach((k) => (o[k] = N(o[k])));
+      return o;
+    });
+
+  const monthlyN = nums(monthly, "total_collected", "scheduled_pi");
+  const rateN = nums(byLoanRate, "scheduled_pi_payment", "last_collected", "collection_rate");
+  const realN = nums(realized, "basis", "expenses", "proceeds", "gross_multiple", "irr");
+
+  const last = monthlyN[monthlyN.length - 1];
+  const prior = monthlyN[monthlyN.length - 2];
+  const totalCollectedAllTime = monthlyN.reduce((t, m) => t + (m.total_collected || 0), 0);
+  const totalRealizedProceeds = realN.reduce((t, r) => t + (r.proceeds || 0), 0);
+
+  const live = rateN.filter((r) =>
+    !["paid_off", "reinstated", "note_sold", "reo_sold", "dil_completed", "charged_off"]
+      .includes(r.current_status)
+  );
+  const lagging = live.filter((r) => r.scheduled_pi_payment && (r.collection_rate ?? 0) < 0.9);
+  const noSchedule = live.filter((r) => !r.scheduled_pi_payment);
+
+  const maxMonth = Math.max(1, ...monthlyN.map((m) => m.total_collected || 0));
+
+  main.innerHTML = `
+  <h1 class="vrb-h1">Income</h1>
+  <p class="vrb-sub">Collections and realized proceeds across the book</p>
+
+  <div class="vrb-kpis">
+    <div class="vrb-kpi"><div class="k">Collected last month</div>
+      <div class="v">${fmtUSD(last ? last.total_collected : 0, 0)}</div>
+      <div class="s">${last ? fmtMonth(last.month) : "—"}${
+        prior && prior.total_collected
+          ? ` · ${fmtPct((last.total_collected - prior.total_collected) / prior.total_collected, 0)} vs prior month`
+          : ""
+      }</div></div>
+    <div class="vrb-kpi"><div class="k">Scheduled last month</div>
+      <div class="v">${fmtUSD(last ? last.scheduled_pi : 0, 0)}</div>
+      <div class="s">from performing loans</div></div>
+    <div class="vrb-kpi ${
+      last && last.scheduled_pi && last.total_collected / last.scheduled_pi < 0.9 ? "warn" : "good"
+    }"><div class="k">Collection rate</div>
+      <div class="v">${
+        last && last.scheduled_pi ? fmtPct(last.total_collected / last.scheduled_pi, 0) : "—"
+      }</div>
+      <div class="s">actual vs scheduled, last month</div></div>
+    <div class="vrb-kpi"><div class="k">Collected, all time</div>
+      <div class="v">${fmtCompact(totalCollectedAllTime)}</div>
+      <div class="s">across every recorded period</div></div>
+    <div class="vrb-kpi good"><div class="k">Realized proceeds</div>
+      <div class="v">${fmtCompact(totalRealizedProceeds)}</div>
+      <div class="s">${realN.length} exited loan${realN.length === 1 ? "" : "s"}</div></div>
+  </div>
+
+  ${
+    lagging.length
+      ? `<div class="alert">
+          <b>${lagging.length} performing loan${lagging.length === 1 ? "" : "s"} collecting under 90% of scheduled P&amp;I</b>
+          ${lagging.map((l) => esc(l.vrb_loan_number)).join(", ")} — check whether these are behind
+          or the schedule on file needs updating.
+        </div>`
+      : ""
+  }
+
+  <div class="vrb-card">
+    <div class="vrb-card-h"><h2>Monthly collections</h2>
+      <span class="meta">scheduled vs actual, whole book</span></div>
+    <div class="vrb-card-b">
+      ${
+        monthlyN.length
+          ? `<ul class="vrb-bars">
+              ${monthlyN.slice(-12).map((m) => `
+                <li>
+                  <span class="vrb-bar-label mono">${fmtMonth(m.month)}</span>
+                  <span class="vrb-bar-track" style="position:relative">
+                    <span class="vrb-bar-fill" style="width:${((m.total_collected || 0) / maxMonth) * 100}%"></span>
+                    ${
+                      m.scheduled_pi
+                        ? `<span style="position:absolute;left:${Math.min(100, (m.scheduled_pi / maxMonth) * 100)}%;
+                            top:0;bottom:0;width:2px;background:var(--red)"
+                            title="Scheduled: ${fmtUSD(m.scheduled_pi, 0)}"></span>`
+                        : ""
+                    }
+                  </span>
+                  <span class="vrb-bar-value mono">${fmtUSD(m.total_collected, 0)}</span>
+                </li>`).join("")}
+            </ul>
+            <p class="note">Red tick marks the scheduled P&amp;I for that month from currently-performing loans.
+              Only loans with a Legal terms schedule on file are counted.</p>`
+          : `<div class="empty">No collections recorded yet.</div>`
+      }
+    </div>
+  </div>
+
+  <div class="vrb-card">
+    <div class="vrb-card-h"><h2>Collection rate by loan</h2>
+      <span class="meta">most recent period with activity</span></div>
+    <div class="scrollx"><table class="vrb-t">
+      <thead><tr><th>Loan</th><th>Borrower</th><th>Status</th>
+        <th class="num">Scheduled P&amp;I</th><th>Last collected</th>
+        <th class="num">Amount</th><th class="num">Rate</th></tr></thead>
+      <tbody>
+        ${live.map((r) => `
+          <tr class="click ${r.scheduled_pi_payment && (r.collection_rate ?? 0) < 0.9 ? "flag" : ""}"
+              onclick="location.href='loan.html?id=${r.loan_id}'">
+            <td class="mono">${esc(r.vrb_loan_number)}</td>
+            <td>${esc(r.borrower_name)}</td>
+            <td>${statusPill(r.current_status)}</td>
+            <td class="num">${r.scheduled_pi_payment ? fmtUSD(r.scheduled_pi_payment, 2) : '<span class="dim">—</span>'}</td>
+            <td class="dim">${r.last_collection_month ? fmtMonth(r.last_collection_month.slice(0,7)) : "no collections yet"}</td>
+            <td class="num">${r.last_collected ? fmtUSD(r.last_collected, 2) : '<span class="dim">—</span>'}</td>
+            <td class="num">${r.collection_rate != null ? fmtPct(r.collection_rate, 0) : '<span class="dim">—</span>'}</td>
+          </tr>`).join("")}
+        ${
+          live.length === 0
+            ? `<tr><td colspan="7"><div class="empty">No live loans.</div></td></tr>`
+            : ""
+        }
+      </tbody>
+    </table></div>
+    ${
+      noSchedule.length
+        ? `<p class="note" style="padding:0 18px 14px">
+            ${noSchedule.length} live loan${noSchedule.length === 1 ? "" : "s"} —
+            ${noSchedule.map((l) => esc(l.vrb_loan_number)).join(", ")} — ${
+              noSchedule.length === 1 ? "has" : "have"
+            } no scheduled P&amp;I on file, so no rate can be shown.
+            Add it under "Fill in missing data" on the loan page.</p>`
+        : ""
+    }
+  </div>
+
+  <div class="vrb-card">
+    <div class="vrb-card-h"><h2>Realized proceeds</h2>
+      <span class="meta">${realN.length} exited loans · ${fmtUSD(totalRealizedProceeds, 0)} returned</span></div>
+    <div class="scrollx"><table class="vrb-t">
+      <thead><tr><th>Loan</th><th>Borrower</th><th>Exit</th>
+        <th class="num">Basis</th><th class="num">Proceeds</th>
+        <th class="num">Multiple</th><th class="num">Hold</th><th class="num">IRR</th></tr></thead>
+      <tbody>
+        ${realN.map((r) => `
+          <tr class="click" onclick="location.href='loan.html?id=${r.loan_id}'">
+            <td class="mono">${esc(r.vrb_loan_number)}</td>
+            <td>${esc(r.borrower_name)}</td>
+            <td>${statusPill(r.exit_type)} <span class="dim mono">${fmtDate(r.exit_date)}</span></td>
+            <td class="num">${fmtUSD(r.basis, 0)}</td>
+            <td class="num">${fmtUSD(r.proceeds, 0)}</td>
+            <td class="num ${r.gross_multiple != null && r.gross_multiple < 1 ? "vrb-neg" : ""}">${
+              r.gross_multiple != null ? r.gross_multiple.toFixed(2) + "×" : "—"
+            }</td>
+            <td class="num dim">${r.hold_days != null ? r.hold_days + "d" : "—"}</td>
+            <td class="num">${r.irr != null ? fmtPct(r.irr, 1) : '<span class="dim">—</span>'}</td>
+          </tr>`).join("")}
+        ${
+          realN.length === 0
+            ? `<tr><td colspan="8"><div class="empty">No exits recorded yet.</div></td></tr>`
+            : ""
+        }
+      </tbody>
+    </table></div>
+    <p class="note" style="padding:0 18px 14px">
+      IRR needs both an outflow and an inflow with real dates — a blank cell means one is missing,
+      not zero return.</p>
+  </div>
+  `;
+});
+</script>
+</body>
+</html>
