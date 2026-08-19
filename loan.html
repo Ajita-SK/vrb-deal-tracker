@@ -34,6 +34,16 @@ function togglePanel() {
   b.textContent = open ? "Close" : "Open";
 }
 
+async function saveExpenseNote(el) {
+  el.disabled = true;
+  const { error } = await sb.from("expenses").update({ description: el.value })
+    .eq("id", el.dataset.expid);
+  el.disabled = false;
+  if (error) { alert("Could not save note: " + error.message); return; }
+  el.style.background = "#DCF5E7";
+  setTimeout(() => { el.style.background = ""; }, 900);
+}
+
 async function saveTerms() {
   const rate = gv("note_rate_pct");
   const patch = {
@@ -60,7 +70,7 @@ async function saveSnapshot() {
     report_type: "loan_level_detail", upb: gv("s_upb"),
     days_delinquent: gv("s_dq"), next_due_date: gv("s_next_due"),
     servicer_advances: gv("s_adv"), accrued_interest: gv("s_int"),
-    pi_collected: gv("s_pi"), net_remittance: gv("s_net"),
+    pi_collected: gv("s_pi"), net_remittance: gv("s_net"), notes: gv("s_note"),
   }, { onConflict: "loan_id,as_of_date,report_type" });
   if (error) return panelMsg("Could not save: " + error.message, true);
   location.reload();
@@ -143,7 +153,8 @@ async function saveExit() {
       + "will be no realised return or IRR for this loan. Continue?")) return;
   const { error } = await sb.rpc("record_exit", {
     p_loan_id: window.__loan.id, p_exit_status: t, p_exit_date: d,
-    p_proceeds: pr == null ? 0 : Number(pr), p_reviewer: vrbUser.email, p_note: null,
+    p_proceeds: pr == null ? 0 : Number(pr), p_reviewer: vrbUser.email,
+    p_note: gv("x_note"),
   });
   if (error) return panelMsg("Could not save: " + error.message, true);
   location.reload();
@@ -355,6 +366,7 @@ vrbBoot("am","Loans", async (main) => {
             ${fld("s_adv","Servicer advances outstanding","","number")}
             ${fld("s_int","Accrued interest","","number")}
           </div>
+          ${fld("s_note","Notes (optional)","","text")}
           <div style="margin-top:12px"><button class="btn" onclick="saveSnapshot()">Save</button></div>
 
           <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
@@ -425,6 +437,7 @@ vrbBoot("am","Loans", async (main) => {
             ${fld("x_date","Exit date","","date")}
             ${fld("x_proceeds","Proceeds","","number")}
           </div>
+          ${fld("x_note","Notes (optional)","","text")}
           <div style="margin-top:12px"><button class="btn" onclick="saveExit()">Record exit</button></div>
         </div>
       </div>

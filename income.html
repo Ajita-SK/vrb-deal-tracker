@@ -161,7 +161,7 @@ vrbBoot("am", "Income", async (main) => {
     <div class="scrollx"><table class="vrb-t">
       <thead><tr><th>Loan</th><th>Borrower</th><th>Exit</th>
         <th class="num">Basis</th><th class="num">Proceeds</th>
-        <th class="num">Multiple</th><th class="num">Hold</th><th class="num">IRR</th></tr></thead>
+        <th class="num">Multiple</th><th class="num">Hold</th><th class="num">IRR</th><th>Notes</th></tr></thead>
       <tbody>
         ${realN.map((r) => `
           <tr class="click" onclick="location.href='loan.html?id=${r.loan_id}'">
@@ -175,10 +175,11 @@ vrbBoot("am", "Income", async (main) => {
             }</td>
             <td class="num dim">${r.hold_days != null ? r.hold_days + "d" : "—"}</td>
             <td class="num">${r.irr != null ? fmtPct(r.irr, 1) : '<span class="dim">—</span>'}</td>
+            <td class="dim" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(r.exit_notes||"")}</td>
           </tr>`).join("")}
         ${
           realN.length === 0
-            ? `<tr><td colspan="8"><div class="empty">No exits recorded yet.</div></td></tr>`
+            ? `<tr><td colspan="9"><div class="empty">No exits recorded yet.</div></td></tr>`
             : ""
         }
       </tbody>

@@ -75,8 +75,11 @@ function draw() {
       <td>${e.paid_date
         ? `<span class="mono dim">${e.paid_date}</span>`
         : `<button class="btn sm" onclick="onPaid('${e.id}',this)">Mark paid</button>`}</td>
+      <td><input class="vrb-in" style="width:180px" data-expid="${e.id}"
+          value="${esc(e.description||"")}" placeholder="add a note…"
+          onchange="onNote(this)"></td>
     </tr>`).join("")
-    : `<tr><td colspan="8"><div class="empty">No invoices match these filters.</div></td></tr>`;
+    : `<tr><td colspan="9"><div class="empty">No invoices match these filters.</div></td></tr>`;
 }
 
 async function onRec(id, v, el) {
@@ -84,6 +87,15 @@ async function onRec(id, v, el) {
   if (await patch(id, "recovery", v)) { refreshHeader(); draw(); }
   el.disabled = false;
 }
+async function onNote(el) {
+  el.disabled = true;
+  const ok = await patch(el.dataset.expid, "description", el.value);
+  el.disabled = false;
+  if (!ok) return;
+  el.style.background = "#DCF5E7";
+  setTimeout(() => { el.style.background = ""; }, 900);
+}
+
 async function onPaid(id, btn) {
   btn.disabled = true; btn.textContent = "Saving…";
   const today = new Date().toISOString().slice(0,10);
