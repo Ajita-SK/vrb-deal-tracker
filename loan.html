@@ -179,19 +179,24 @@ vrbBoot("am","Loans", async (main) => {
   const spend = exps.reduce((t,e)=>t+(N(e.amount)||0),0);
   const undet = exps.filter(e=>e.recovery==="undetermined");
   const unpaid = exps.filter(e=>!e.paid_date);
+  // Income received = every real cash inflow on this loan — collections,
+  // recoveries, and (if exited) proceeds. Computed from the same rows the
+  // Cash flows table below already shows, so the two always agree.
+  const incomeReceived = flows.reduce((t,f)=>t + Math.max(0, N(f.amount)||0), 0);
 
   const facts = [
     ["UPB", fmtUSD(r.upb)],
     ["Purchase price", fmtUSD(r.purchase_price)],
     ["All-in basis", fmtUSD(r.all_in_basis)],
     ["Expenses", fmtUSD(r.total_spend)],
-    ["Recoverable advances", fmtUSD(r.recoverable_advances)],
+    ["Income received", fmtUSD(incomeReceived)],
     ["Collateral value", fmtUSD(r.latest_value)],
     ["LTV", fmtPct(r.ltv,0)],
     ["Note rate", fmtPct(r.note_rate,2)],
     ["Legal maturity", fmtDate(r.legal_maturity_date)],
     ["Days in stage", r.days_in_status!=null ? r.days_in_status+"d" : "—"],
     ["Realised IRR", irr && irr.irr!=null ? fmtPct(N(irr.irr),1) : "—"],
+    ["Recoverable advances", fmtUSD(r.recoverable_advances)],
     ["Data as of", fmtDate(r.data_as_of)],
   ];
 
